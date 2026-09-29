@@ -95,6 +95,27 @@ export const AuthProvider = ({ children }) => {
        }
     };
 
+    const googleLogin = async (credential) => {
+        try {
+            const response = await api.post('/auth/google', { credential });
+            const { user, token } = response.data.data;
+
+            if (token) {
+                localStorage.setItem('token', token);
+            }
+
+            setUser(user);
+            await initializeSocket();
+
+            return { success: true };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.response?.data?.message || 'Google login failed'
+            };
+        }
+    };
+
     const logout = async () => {
         try {
             await api.post('/auth/logout');
@@ -121,6 +142,7 @@ export const AuthProvider = ({ children }) => {
         loading,
         login,
         register,
+        googleLogin,
         logout,
         updateUser,
         isAuthenticated: !!user

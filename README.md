@@ -200,6 +200,15 @@ cd Tastebuds-main
 
 ---
 
+### 🔑 4. OAuth Configuration (Google Sign-In)
+
+1. Create a project in [Google Cloud Console](https://console.cloud.google.com/).
+2. Setup OAuth consent screen and create **OAuth 2.0 Client IDs (Web application)**.
+3. Add `http://localhost:5173` to **Authorized JavaScript origins**.
+4. Configure in `backend/.env` (`GOOGLE_CLIENT_ID`) and `frontend/.env` (`VITE_GOOGLE_CLIENT_ID`).
+
+---
+
 ## 📡 API Reference Overview
 
 | Endpoint | Method | Description |

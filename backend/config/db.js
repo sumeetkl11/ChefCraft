@@ -107,8 +107,12 @@ export const initDB = async () => {
             `ALTER TABLE users ADD COLUMN IF NOT EXISTS name VARCHAR(255) NOT NULL DEFAULT ''`);
         await pool.query(`
             ALTER TABLE users
+            ALTER COLUMN password DROP NOT NULL,
             ADD COLUMN IF NOT EXISTS bio TEXT,
             ADD COLUMN IF NOT EXISTS avatar_url TEXT,
+            ADD COLUMN IF NOT EXISTS google_id VARCHAR(255),
+            ADD COLUMN IF NOT EXISTS github_id VARCHAR(255),
+            ADD COLUMN IF NOT EXISTS auth_provider VARCHAR(50) DEFAULT 'local',
             ADD COLUMN IF NOT EXISTS follower_count INT DEFAULT 0,
             ADD COLUMN IF NOT EXISTS following_count INT DEFAULT 0,
             ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE,
@@ -116,6 +120,13 @@ export const initDB = async () => {
             ADD COLUMN IF NOT EXISTS email_verification_expires TIMESTAMPTZ,
             ADD COLUMN IF NOT EXISTS password_reset_token VARCHAR(255),
             ADD COLUMN IF NOT EXISTS password_reset_expires TIMESTAMPTZ
+        `);
+        await pool.query(`
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id) WHERE google_id IS NOT NULL;
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_users_github_id ON users(github_id) WHERE github_id IS NOT NULL;
+        `);
+        await pool.query(`
+            ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS measurement_system VARCHAR(20) DEFAULT 'metric'
         `);
         console.log('[DB] ✅ Users table updated');
         
