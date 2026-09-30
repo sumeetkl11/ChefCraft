@@ -176,9 +176,12 @@ static async findById(id, userId) {
             params.push(filters.max_cook_time);
         }
         
-        // SORTING
-        const sortBy = filters.sort_by || 'created_at';
-        const sortOrder = filters.sort_order ==='asc' ? 'ASC' : 'DESC';
+        // SORTING - Whitelist allowed columns to prevent SQL injection
+        const ALLOWED_SORT_COLUMNS = ['created_at', 'name', 'prep_time', 'cook_time', 'difficulty', 'servings'];
+        const sortBy = ALLOWED_SORT_COLUMNS.includes(filters.sort_by)
+            ? filters.sort_by
+            : 'created_at';
+        const sortOrder = filters.sort_order === 'asc' ? 'ASC' : 'DESC';
         query += ` ORDER BY ${sortBy} ${sortOrder}`;
 
         // PAGINATION
