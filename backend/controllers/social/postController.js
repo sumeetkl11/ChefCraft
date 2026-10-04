@@ -16,7 +16,7 @@ export const getFeedPosts = async (req, res, next) => {
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.max(1, Math.min(50, parseInt(req.query.limit) || 10));
     const offset = (page - 1) * limit;
-    const userId = req.user?.id;
+    const userId = req.user?.id || null;
 
     let posts = [];
     let total = 0;

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import toast from 'react-hot-toast';
-import { buildApiUrl } from '../services/api';
+import api from '../services/api';
 import { ImagePlus, NotebookPen, Share2, Sparkles, UploadCloud, X } from 'lucide-react';
 import '../styles/CreatePost.css';
 
@@ -14,8 +14,6 @@ export default function CreatePost({ onPostCreated, buttonLabel = 'Create Post',
   const [uploadedImageUrl, setUploadedImageUrl] = useState('');
   const [imagePreview, setImagePreview] = useState('');
   const [loading, setLoading] = useState(false);
-
-  const token = localStorage.getItem('token');
 
   useEffect(() => {
     if (showModal) {
@@ -58,12 +56,10 @@ export default function CreatePost({ onPostCreated, buttonLabel = 'Create Post',
 
   const fetchUserRecipes = async () => {
     try {
-      const response = await fetch(buildApiUrl('/recipes'), {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const result = await response.json();
-      if (result.success) {
-        setRecipes(Array.isArray(result.data?.recipes) ? result.data.recipes : []);
+      const response = await api.get('/recipes');
+      if (response.data?.success) {
+        const list = response.data?.data?.recipes || response.data?.data || [];
+        setRecipes(Array.isArray(list) ? list : []);
       }
     } catch (err) {
       console.error('Error fetching recipes:', err);
@@ -121,22 +117,15 @@ export default function CreatePost({ onPostCreated, buttonLabel = 'Create Post',
       }
 
       setLoading(true);
-      const response = await fetch(buildApiUrl('/posts'), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          recipeId: selectedRecipe || null,
-          caption,
-          imageUrl: finalImageUrl
-        })
+      const response = await api.post('/posts', {
+        recipeId: selectedRecipe || null,
+        caption,
+        imageUrl: finalImageUrl
       });
 
-      if (response.ok) {
-        const result = await response.json();
-        onPostCreated(result.data);
+      if (response.data?.success || response.status === 201) {
+        const postData = response.data?.data;
+        onPostCreated(postData);
         setShowModal(false);
         setSelectedRecipe('');
         setCaption('');

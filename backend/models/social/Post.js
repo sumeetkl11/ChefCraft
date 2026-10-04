@@ -3,34 +3,16 @@ import { pool } from '../../config/db.js';
 import Follow from './Follow.js';
 
 class Post {
-  static schemaCache = null;
+  static schemaCache = {
+    hasPostCaption: false,
+    hasPostContent: true,
+    hasLikeCount: false,
+    hasCommentCount: false,
+    hasUserName: true,
+    hasUserAvatar: true
+  };
 
   static async getSchemaConfig() {
-    if (Post.schemaCache) {
-      return Post.schemaCache;
-    }
-
-    const result = await pool.query(
-      `SELECT table_name, column_name
-       FROM information_schema.columns
-       WHERE table_schema = 'public'
-         AND (
-           (table_name = 'posts' AND column_name IN ('caption', 'content', 'like_count', 'comment_count')) OR
-           (table_name = 'users' AND column_name IN ('name', 'avatar_url'))
-         )`
-    );
-
-    const columns = new Set(result.rows.map((row) => `${row.table_name}.${row.column_name}`));
-
-    Post.schemaCache = {
-      hasPostCaption: columns.has('posts.caption'),
-      hasPostContent: columns.has('posts.content'),
-      hasLikeCount: columns.has('posts.like_count'),
-      hasCommentCount: columns.has('posts.comment_count'),
-      hasUserName: columns.has('users.name'),
-      hasUserAvatar: columns.has('users.avatar_url')
-    };
-
     return Post.schemaCache;
   }
 

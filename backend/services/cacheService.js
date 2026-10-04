@@ -69,8 +69,18 @@ export const invalidateUser = async (userId) => {
   if (!redisClient?.isReady) return;
   try {
     await redisClient.del(CACHE_KEYS.USER_PROFILE(userId));
-    // Invalidate user feed keys if any exist
-    const feedKeys = await redisClient.keys(`feed:${userId}:*`);
+    // Invalidate user feed keys if any exist using SCAN instead of KEYS
+    const feedKeys = [];
+    let cursor = 0;
+    do {
+      const result = await redisClient.scan(cursor, {
+        MATCH: `feed:${userId}:*`,
+        COUNT: 100
+      });
+      cursor = typeof result.cursor === 'string' ? parseInt(result.cursor, 10) : result.cursor;
+      feedKeys.push(...result.keys);
+    } while (cursor !== 0);
+
     if (feedKeys.length > 0) {
       await redisClient.del(feedKeys);
     }
@@ -101,7 +111,18 @@ export const invalidatePost = async (postId) => {
 export const invalidateFeeds = async () => {
   if (!redisClient?.isReady) return;
   try {
-    const feedKeys = await redisClient.keys('feed:*');
+    // Use SCAN instead of KEYS to avoid blocking Redis
+    const feedKeys = [];
+    let cursor = 0;
+    do {
+      const result = await redisClient.scan(cursor, {
+        MATCH: 'feed:*',
+        COUNT: 100
+      });
+      cursor = typeof result.cursor === 'string' ? parseInt(result.cursor, 10) : result.cursor;
+      feedKeys.push(...result.keys);
+    } while (cursor !== 0);
+
     if (feedKeys.length > 0) {
       await redisClient.del(feedKeys);
     }

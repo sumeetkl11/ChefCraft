@@ -177,11 +177,11 @@ static async findById(id, userId) {
         }
         
         // SORTING - Whitelist allowed columns to prevent SQL injection
-        const ALLOWED_SORT_COLUMNS = ['created_at', 'name', 'prep_time', 'cook_time', 'difficulty', 'servings'];
+        const ALLOWED_SORT_COLUMNS = ['created_at', 'name', 'prep_time', 'cook_time', 'difficulty'];
         const sortBy = ALLOWED_SORT_COLUMNS.includes(filters.sort_by)
             ? filters.sort_by
             : 'created_at';
-        const sortOrder = filters.sort_order === 'asc' ? 'ASC' : 'DESC';
+        const sortOrder = (filters.sort_order && String(filters.sort_order).toLowerCase() === 'asc') ? 'ASC' : 'DESC';
         query += ` ORDER BY ${sortBy} ${sortOrder}`;
 
         // PAGINATION

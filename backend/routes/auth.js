@@ -14,6 +14,7 @@ router.post('/reset-password', authLimiter, authController.requestPasswordReset)
 // protected routes
 router.get('/me', authMiddleware, authController.getCurrentUser);
 router.post('/logout', authMiddleware, authController.logout);
+router.post('/refresh', authController.refreshAccessToken);
 
 
 export default router;

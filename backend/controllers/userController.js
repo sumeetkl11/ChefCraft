@@ -48,7 +48,7 @@ export const changePassword = async (req, res, next) => {
             throw ApiError.badRequest("Current password and new password are required");
         }
 
-        const user = await User.findById(userId);
+        const user = await User.findWithPasswordById(userId);
         const isValid = await User.verifyPassword(currentPassword, user.password);
         if (!isValid) throw ApiError.badRequest("Current password is incorrect");
 

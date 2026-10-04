@@ -196,12 +196,26 @@ class ShoppingList {
                 [userId]
             );
 
-            // Add checked items to pantry
-            for (const item of checkedItems.rows) {
+            // Add checked items to pantry in a single batch insert
+            if (checkedItems.rows.length > 0) {
+                const values = checkedItems.rows.map((item, idx) => {
+                    const base = idx * 6;
+                    return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6})`;
+                }).join(', ');
+
+                const params = checkedItems.rows.flatMap(item => [
+                    userId,
+                    item.ingredient_name,
+                    parseInt(item.quantity),
+                    item.unit,
+                    item.category,
+                    expiryDate
+                ]);
+
                 await client.query(
                     `INSERT INTO pantry_items (user_id, name, quantity, unit, category, expiry_date)
-                    VALUES ($1, $2, $3, $4, $5, $6)`,
-                    [userId, item.ingredient_name, parseInt(item.quantity), item.unit, item.category, expiryDate]
+                    VALUES ${values}`,
+                    params
                 );
             }
 

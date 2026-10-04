@@ -1,26 +1,18 @@
-// frontend/src/components/ChallengeCard.jsx
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { buildApiUrl } from '../services/api';
+import api from '../services/api';
 import '../styles/ChallengeCard.css';
 
 export default function ChallengeCard({ challenge, onJoin }) {
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
-  const token = localStorage.getItem('token');
 
   const handleJoin = async () => {
     try {
       setLoading(true);
-      const response = await fetch(
-        buildApiUrl(`/challenges/${challenge.id}/join`),
-        {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` }
-        }
-      );
+      const response = await api.post(`/challenges/${challenge.id}/join`, {});
 
-      if (response.ok) {
+      if (response.data?.success || response.status === 200 || response.status === 201) {
         onJoin?.(challenge.id);
       }
     } catch (error) {

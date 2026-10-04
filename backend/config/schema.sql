@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS user_preferences (
     allergens TEXT[] DEFAULT '{}',
     preference_cuisine TEXT[] DEFAULT '{}',
     default_servings INT DEFAULT 4,
-    measurement_unit VARCHAR(20) DEFAULT 'metric',
+    measurement_system VARCHAR(20) DEFAULT 'metric',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(user_id)
@@ -106,7 +106,6 @@ CREATE TABLE IF NOT EXISTS meal_plans (
     recipe_id UUID REFERENCES recipes(id) ON DELETE CASCADE,
     meal_date DATE NOT NULL,
     meal_type VARCHAR(50) NOT NULL CHECK (meal_type IN ('breakfast', 'lunch', 'dinner')),
-    meal_data DATE NOT NULL DEFAULT CURRENT_DATE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(user_id, recipe_id, meal_type, meal_date)
@@ -219,6 +218,9 @@ CREATE TABLE IF NOT EXISTS challenges (
     image_url TEXT,
     start_date DATE NOT NULL,
     end_date DATE NOT NULL,
+    recipe_ids UUID[] DEFAULT '{}',
+    participant_count INT DEFAULT 0,
+    created_by UUID REFERENCES users(id) ON DELETE CASCADE,
     visibility VARCHAR(20) DEFAULT 'public' CHECK (visibility IN ('public', 'private')),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

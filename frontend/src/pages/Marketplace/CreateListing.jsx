@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import Navbar from '../../components/Navbar';
 import { useNavigate } from 'react-router-dom';
-import { buildApiUrl } from '../../services/api';
+import api from '../../services/api';
 import toast from 'react-hot-toast';
 
 export default function CreateListing() {
@@ -16,23 +16,16 @@ export default function CreateListing() {
     const payload = Object.fromEntries(formData);
 
     try {
-      const response = await fetch(buildApiUrl('/marketplace/listings'), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify(payload)
-      });
+      const response = await api.post('/marketplace/listings', payload);
       
-      if (response.ok) {
+      if (response.data?.success || response.status === 201) {
         toast.success('Listing created!');
         navigate('/marketplace');
       } else {
         toast.error('Failed to create listing');
       }
     } catch (err) {
-      toast.error('Error creating listing');
+      toast.error(err.response?.data?.message || 'Error creating listing');
     } finally {
       setLoading(false);
     }

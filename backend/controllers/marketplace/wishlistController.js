@@ -1,13 +1,10 @@
-import { pool } from '../../config/db.js';
+import Wishlist from '../../models/marketplace/Wishlist.js';
 
 export const getWishlists = async (req, res) => {
     try {
         const userId = req.user.id;
-        const result = await pool.query(
-            `SELECT * FROM wishlists WHERE user_id = $1 ORDER BY created_at DESC`,
-            [userId]
-        );
-        res.json({ success: true, data: result.rows });
+        const wishlists = await Wishlist.findByUserId(userId);
+        res.json({ success: true, data: wishlists });
     } catch (error) {
         console.error('Error fetching wishlists:', error);
         res.status(500).json({ success: false, message: 'Server error' });
@@ -19,14 +16,8 @@ export const createWishlist = async (req, res) => {
         const { name, visibility } = req.body;
         const userId = req.user.id;
 
-        const result = await pool.query(
-            `INSERT INTO wishlists (user_id, name, visibility)
-             VALUES ($1, $2, $3)
-             RETURNING *`,
-            [userId, name, visibility || 'private']
-        );
-
-        res.status(201).json({ success: true, data: result.rows[0] });
+        const wishlist = await Wishlist.create(userId, name, visibility || 'private');
+        res.status(201).json({ success: true, data: wishlist });
     } catch (error) {
         console.error('Error creating wishlist:', error);
         res.status(500).json({ success: false, message: 'Server error' });
@@ -36,15 +27,21 @@ export const createWishlist = async (req, res) => {
 export const getWishlistItems = async (req, res) => {
     try {
         const { id } = req.params;
-        const result = await pool.query(
-            `SELECT wi.*, m.title, m.price, m.image_url, m.status
-             FROM wishlist_items wi
-             JOIN marketplace_listings m ON wi.product_id = m.id
-             WHERE wi.wishlist_id = $1
-             ORDER BY wi.created_at DESC`,
-            [id]
-        );
-        res.json({ success: true, data: result.rows });
+        const userId = req.user.id;
+
+        // Verify ownership or public visibility
+        const isOwner = await Wishlist.verifyOwnership(id, userId);
+        const isPublic = await Wishlist.isPublic(id);
+
+        if (!isOwner && !isPublic) {
+            return res.status(403).json({
+                success: false,
+                message: 'Access denied: You do not have permission to view this wishlist'
+            });
+        }
+
+        const items = await Wishlist.getItems(id);
+        res.json({ success: true, data: items });
     } catch (error) {
         console.error('Error fetching wishlist items:', error);
         res.status(500).json({ success: false, message: 'Server error' });
@@ -55,16 +52,19 @@ export const addWishlistItem = async (req, res) => {
     try {
         const { id } = req.params;
         const { product_id, price_tracked } = req.body;
+        const userId = req.user.id;
 
-        const result = await pool.query(
-            `INSERT INTO wishlist_items (wishlist_id, product_id, price_tracked)
-             VALUES ($1, $2, $3)
-             ON CONFLICT (wishlist_id, product_id) DO NOTHING
-             RETURNING *`,
-            [id, product_id, price_tracked]
-        );
+        // Verify ownership before allowing modifications
+        const isOwner = await Wishlist.verifyOwnership(id, userId);
+        if (!isOwner) {
+            return res.status(403).json({
+                success: false,
+                message: 'Access denied: You can only add items to your own wishlists'
+            });
+        }
 
-        res.status(201).json({ success: true, data: result.rows[0] });
+        const item = await Wishlist.addItem(id, product_id, price_tracked);
+        res.status(201).json({ success: true, data: item });
     } catch (error) {
         console.error('Error adding item to wishlist:', error);
         res.status(500).json({ success: false, message: 'Server error' });

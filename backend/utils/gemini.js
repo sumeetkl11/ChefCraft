@@ -1,4 +1,6 @@
 import dotenv from 'dotenv';
+import crypto from 'crypto';
+import { redisClient } from '../cache/redis.js';
 
 dotenv.config();
 
@@ -174,12 +176,78 @@ export const generateRecipe = async ({
 Create a DIFFERENT recipe with a unique approach. Vary the cooking method, flavor profile, or presentation style.`;
     }
 
+    // Sanitize user inputs to prevent prompt injection
+    const sanitizeInput = (input, maxLength = 500) => {
+        if (!input) return '';
+        return String(input)
+            .slice(0, maxLength)
+            .replace(/[<>]/g, '') // Remove angle brackets
+            .trim();
+    };
+
+    const sanitizedCuisine = sanitizeInput(cuisine, 50);
+    const sanitizedIngredients = (Array.isArray(ingredients) ? ingredients : [])
+        .slice(0, 50) // Max 50 ingredients
+        .map(ing => sanitizeInput(ing, 100))
+        .filter(Boolean);
+    const sanitizedDietary = (Array.isArray(dietaryRestrictions) ? dietaryRestrictions : [])
+        .slice(0, 10)
+        .map(d => sanitizeInput(d, 50))
+        .filter(Boolean);
+
+    const formatPantryItem = (item) => {
+        if (!item) return '';
+        if (typeof item === 'string') return sanitizeInput(item, 100);
+        const name = sanitizeInput(item.name || item.ingredient_name, 100);
+        if (!name) return '';
+        const qty = item.quantity ? ` (${item.quantity} ${sanitizeInput(item.unit, 20) || 'unit(s)'})` : '';
+        return `${name}${qty}`;
+    };
+
+    const sanitizedPantry = (Array.isArray(pantryItems) ? pantryItems : [])
+        .slice(0, 100)
+        .map(formatPantryItem)
+        .filter(Boolean);
+
+    // Create cache key based on input hash (skip for regenerations)
+    let cacheKey = null;
+    if (!regenerate) {
+        const cacheInput = JSON.stringify({
+            cuisine: sanitizedCuisine,
+            ingredients: [...sanitizedIngredients].sort(),
+            dietary: [...sanitizedDietary].sort(),
+            pantry: [...sanitizedPantry].sort(),
+            cookingTime,
+            servings: parseInt(servings) || 4
+        });
+        const hash = crypto.createHash('sha256').update(cacheInput).digest('hex').slice(0, 16);
+        cacheKey = `ai:recipe:${hash}`;
+
+        // Try to get from cache (24h TTL)
+        if (redisClient?.isReady) {
+            try {
+                const cached = await redisClient.get(cacheKey);
+                if (cached) {
+                    console.log('✓ AI cache hit for recipe generation');
+                    return normalizeRecipe(JSON.parse(cached), sanitizedCuisine, servings);
+                }
+            } catch (err) {
+                console.warn('[Cache Warning] Failed to read AI cache:', err.message);
+            }
+        }
+    }
+
     const systemPrompt = 'You are a professional chef. Return ONLY valid JSON with no markdown or code fences.';
 
-    const userPrompt = `Create a ${cuisine} recipe for ${servings} servings using: ${ingredients.length > 0 ? ingredients.join(', ') : 'pantry items'}.
-${pantryContext}
-${dietaryInfo}
-Cooking time: ${timeGuide[cookingTime] || 'any'}${regenerationPrompt}
+    const userPrompt = `Create a recipe with the following requirements:
+
+<cuisine>${sanitizedCuisine}</cuisine>
+<servings>${parseInt(servings) || 4}</servings>
+<ingredients>${sanitizedIngredients.length > 0 ? sanitizedIngredients.join(', ') : 'use pantry items'}</ingredients>
+${sanitizedPantry.length > 0 ? `<pantry>${sanitizedPantry.join(', ')}</pantry>` : ''}
+${sanitizedDietary.length > 0 ? `<dietary_restrictions>${sanitizedDietary.join(', ')}</dietary_restrictions>` : ''}
+<cooking_time>${timeGuide[cookingTime] || 'any'}</cooking_time>
+${regenerationPrompt}
 
 Include specific quantities in instructions (e.g., "Add 2 cups flour" not "Add flour").
 
@@ -187,11 +255,11 @@ Return this JSON structure with actual values:
 {
   "name": "Recipe Name",
   "description": "Brief description",
-  "cuisineType": "${cuisine}",
+  "cuisineType": "${sanitizedCuisine}",
   "difficulty": "Easy",
   "prepTime": 15,
   "cookTime": 30,
-  "servings": ${servings},
+  "servings": ${parseInt(servings) || 4},
   "ingredients": [{"name": "ingredient", "quantity": 1, "unit": "cup"}],
   "instructions": ["Step 1", "Step 2"],
   "nutrition": {"calories": 400, "protein": 20, "carbs": 45, "fat": 15, "fiber": 5},
@@ -200,7 +268,19 @@ Return this JSON structure with actual values:
 
     try {
         const recipe = await groqChat(systemPrompt, userPrompt);
-        return normalizeRecipe(recipe, cuisine, servings);
+        const normalized = normalizeRecipe(recipe, cuisine, servings);
+
+        // Cache the response (24h TTL) if not a regeneration
+        if (cacheKey && redisClient?.isReady) {
+            try {
+                await redisClient.setEx(cacheKey, 86400, JSON.stringify(recipe)); // 24 hours
+                console.log('✓ AI response cached');
+            } catch (err) {
+                console.warn('[Cache Warning] Failed to cache AI response:', err.message);
+            }
+        }
+
+        return normalized;
     } catch (error) {
         console.error('Groq API Error (generateRecipe):', error);
         throw error;

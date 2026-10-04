@@ -39,11 +39,16 @@ export function initializeSocialSocket(io) {
       } else {
         socket.isAuthenticated = false;
       }
-      // Allow both authenticated and unauthenticated connections
+
+      // Require authentication for all socket connections
+      if (!socket.isAuthenticated || !socket.userId) {
+        return next(new Error('Unauthorized: Authentication required'));
+      }
+
       next();
     } catch (error) {
       console.error('Socket.io auth middleware error:', error);
-      next();
+      next(new Error('Authentication failed'));
     }
   });
 
@@ -75,11 +80,7 @@ export function initializeSocialSocket(io) {
     });
 
     // --- Notification Events ---
-    socket.on('notification:send', (data) => {
-      if (data.userId) {
-        io.to(`user:${data.userId}:notifications`).emit('notification:new', data);
-      }
-    });
+    // NOTE: notification:send removed - notifications must originate from backend controllers only
 
     socket.on('notification:read', (notificationId) => {
       if (socket.userId) {
@@ -91,6 +92,10 @@ export function initializeSocialSocket(io) {
 
     // --- Typing Indicators ---
     socket.on('typing:start', (conversationId) => {
+      if (!socket.userId) {
+        socket.emit('error', { message: 'Authentication required' });
+        return;
+      }
       socket.to(`conversation:${conversationId}`).emit('typing:start', {
         userId: socket.userId,
         userName: socket.email
@@ -101,6 +106,10 @@ export function initializeSocialSocket(io) {
      * Emit when user stops typing
      */
     socket.on('typing:end', (conversationId) => {
+      if (!socket.userId) {
+        socket.emit('error', { message: 'Authentication required' });
+        return;
+      }
       socket.to(`conversation:${conversationId}`).emit('typing:end', {
         userId: socket.userId
       });
@@ -111,18 +120,38 @@ export function initializeSocialSocket(io) {
     /**
      * Emit like activity to followers
      * Called when post is liked
+     * Validates that socket.userId matches the liker
      */
     socket.on('activity:like', (data) => {
+      if (!socket.userId) {
+        socket.emit('error', { message: 'Authentication required' });
+        return;
+      }
+      // Ensure the liker is the authenticated user
+      if (data.likerId && data.likerId !== socket.userId) {
+        socket.emit('error', { message: 'Unauthorized: Cannot send likes as another user' });
+        return;
+      }
       // Broadcast to followers room
-      io.to(`activity:${data.postAuthorId}:followers`).emit('activity:like', data);
+      io.to(`activity:${data.postAuthorId}:followers`).emit('activity:like', {
+        ...data,
+        likerId: socket.userId // Force authentic userId
+      });
     });
 
     /**
      * Emit new post to followers
      */
     socket.on('activity:post', (data) => {
-      // Broadcast to followers room
-      io.to(`activity:${socket.userId}:followers`).emit('activity:post', data);
+      if (!socket.userId) {
+        socket.emit('error', { message: 'Authentication required' });
+        return;
+      }
+      // Broadcast to authenticated user's own followers
+      io.to(`activity:${socket.userId}:followers`).emit('activity:post', {
+        ...data,
+        userId: socket.userId // Force authentic userId
+      });
     });
 
     /**
@@ -201,7 +230,15 @@ export function initializeSocialSocket(io) {
      * Streak update notification broadcasted to follower activity
      */
     socket.on('activity:streak', (data) => {
-      io.to(`activity:${socket.userId}:followers`).emit('activity:streak', data);
+      if (!socket.userId) {
+        socket.emit('error', { message: 'Authentication required' });
+        return;
+      }
+      // Broadcast authenticated user's streak to their followers
+      io.to(`activity:${socket.userId}:followers`).emit('activity:streak', {
+        ...data,
+        userId: socket.userId // Force authentic userId
+      });
     });
 
     // --- Error handling ---

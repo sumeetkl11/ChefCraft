@@ -26,7 +26,9 @@ if (connectionString) {
         ? connectionString.replace('sslmode=require', 'uselibpqcompat=true&sslmode=require')
         : connectionString;
     if (process.env.NODE_ENV === 'production' || connectionString.includes('sslmode=') || connectionString.includes('neon.tech')) {
-        poolConfig.ssl = { rejectUnauthorized: false };
+        poolConfig.ssl = {
+            rejectUnauthorized: process.env.ALLOW_SELF_SIGNED_CERT !== 'true'
+        };
     }
 } else {
     poolConfig.host = process.env.PGHOST || 'localhost';

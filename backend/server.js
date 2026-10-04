@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import express from 'express';
+import compression from 'compression';
 import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
@@ -42,6 +43,9 @@ import { initializeSocialSocket } from './sockets/socialSocket.js';
 const PORT = process.env.PORT || 8000;
 const app = express();
 
+// Trust proxy to get real client IP behind load balancers (Render, Vercel, etc)
+app.set('trust proxy', 1);
+
 const configuredOrigins = [
   process.env.CLIENT_URL,
   process.env.FRONTEND_URL,
@@ -66,11 +70,6 @@ function isAllowedOrigin(origin) {
     return true;
   }
 
-  // Allow any *.vercel.app domain dynamically
-  if (origin.endsWith('.vercel.app')) {
-    return true;
-  }
-
   return allowedOrigins.has(origin);
 }
 
@@ -81,7 +80,7 @@ const corsOptions = {
       return;
     }
 
-    callback(new Error(`CORS blocked for origin: ${origin}`));
+    callback(null, false);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -125,6 +124,9 @@ app.use((req, res, next) => {
   req.io = req.app.get('io');
   next();
 });
+
+// Gzip/Brotli response compression for ultra-fast payload delivery
+app.use(compression());
 
 // Middleware
 app.use(express.json({ limit: '5mb' }));

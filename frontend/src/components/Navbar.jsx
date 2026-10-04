@@ -77,7 +77,7 @@ export default function Navbar() {
         </div>
       </header>
 
-      <nav className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex justify-between items-center px-4 py-1.5 bg-white/50 text-[#3d1e06] backdrop-blur-2xl border border-white/80 w-[calc(100%-40px)] max-w-2xl rounded-full shadow-[0_16px_40px_rgba(180,110,40,0.10)]">
+      <nav className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex justify-between items-center px-4 py-1.5 bg-white/50 text-[#3d1e06] backdrop-blur-2xl border border-white/80 w-[calc(100%-40px)] max-w-2xl rounded-full shadow-[0_16px_40px_rgba(180,110,40,0.10)]">
         <NavLink to="/dashboard" className={({isActive}) => `flex flex-col items-center justify-center rounded-full px-4 sm:px-6 py-1.5 transition-all duration-[180ms] ease-out ${isActive ? 'bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-[0_8px_16px_rgba(249,115,22,0.35)] font-bold scale-105 -translate-y-0.5' : 'text-[#574538] hover:text-[#3d1e06] hover:bg-white/60'}`}>
           {({isActive}) => (
             <>
@@ -105,19 +105,13 @@ export default function Navbar() {
           )}
         </NavLink>
 
-        <NavLink to="/pantry" className={({isActive}) => {
-          const active = isActive || location.pathname === '/marketplace';
-          return `flex flex-col items-center justify-center rounded-full px-4 sm:px-6 py-1.5 transition-all duration-[180ms] ease-out ${active ? 'bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-[0_8px_16px_rgba(249,115,22,0.35)] font-bold scale-105 -translate-y-0.5' : 'text-[#574538] hover:text-[#3d1e06] hover:bg-white/60'}`;
-        }}>
-          {({isActive}) => {
-            const active = isActive || location.pathname === '/marketplace';
-            return (
-              <>
-                <span className="material-symbols-outlined" style={{ fontVariationSettings: active ? "'FILL' 1" : "'FILL' 0" }}>inventory_2</span>
-                <span className="font-label-sm text-xs sm:text-sm hidden sm:block">Pantry</span>
-              </>
-            );
-          }}
+        <NavLink to="/pantry" className={({isActive}) => `flex flex-col items-center justify-center rounded-full px-4 sm:px-6 py-1.5 transition-all duration-[180ms] ease-out ${isActive ? 'bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-[0_8px_16px_rgba(249,115,22,0.35)] font-bold scale-105 -translate-y-0.5' : 'text-[#574538] hover:text-[#3d1e06] hover:bg-white/60'}`}>
+          {({isActive}) => (
+            <>
+              <span className="material-symbols-outlined" style={{ fontVariationSettings: isActive ? "'FILL' 1" : "'FILL' 0" }}>inventory_2</span>
+              <span className="font-label-sm text-xs sm:text-sm hidden sm:block">Pantry</span>
+            </>
+          )}
         </NavLink>
 
         <NavLink to="/social" className={({isActive}) => `flex flex-col items-center justify-center rounded-full px-4 sm:px-6 py-1.5 transition-all duration-[180ms] ease-out ${isActive ? 'bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-[0_8px_16px_rgba(249,115,22,0.35)] font-bold scale-105 -translate-y-0.5' : 'text-[#574538] hover:text-[#3d1e06] hover:bg-white/60'}`}>

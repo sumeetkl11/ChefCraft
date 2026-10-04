@@ -19,54 +19,40 @@ export const AuthProvider = ({ children }) => {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        // Check if user is already authenticated via httpOnly cookie
         const checkAuth = async () => {
             try {
                 const response = await api.get('/auth/me');
                 if (response.data.success) {
-                    const { user, token } = response.data.data;
-                    if (token && token !== 'null' && token !== 'undefined') {
-                        localStorage.setItem('token', token);
-                    }
+                    const { user } = response.data.data;
                     setUser(user);
-                    // Initialize socket connection after user is confirmed
-                    await initializeSocket();
+                    void initializeSocket().catch((err) => console.warn('Socket background init error:', err));
                 } else {
                     setUser(null);
-                    localStorage.removeItem('token');
                 }
             } catch (error) {
-                // User not authenticated or token expired
                 console.log('No active session');
-                localStorage.removeItem('token');
                 setUser(null);
             } finally {
                 setLoading(false);
             }
         };
-        
+
         checkAuth();
     }, []);
 
     const login = async (email, password) => {
         try {
             const response = await api.post('/auth/login', { email, password });
-            const { user, token } = response.data.data;
-
-            if (token) {
-                localStorage.setItem('token', token);
-            }
+            const { user } = response.data.data;
 
             setUser(user);
-            
-            // Initialize Socket.io connection and await it
-            await initializeSocket();
+            void initializeSocket().catch((err) => console.warn('Socket background init error:', err));
 
             return { success: true };
         } catch (error) {
-            return { 
-                success: false, 
-                error: error.response?.data?.message || 'Login failed' 
+            return {
+                success: false,
+                error: error.response?.data?.message || 'Login failed'
             };
         }
     };
@@ -74,23 +60,17 @@ export const AuthProvider = ({ children }) => {
     const register = async (name, email, password) => {
        try {
             const response = await api.post('/auth/signup', { name, email, password });
-            const { user, token } = response.data.data;
+            const { user } = response.data.data;
 
-            if (token) {
-                localStorage.setItem('token', token);
-            }
-            
             setUser(user);
-            
-            // Initialize Socket.io connection and await it
-            await initializeSocket();
-            
+            void initializeSocket().catch((err) => console.warn('Socket background init error:', err));
+
             return { success: true };
-        
+
        } catch (error) {
-        return { 
-            success: false, 
-            error: error.response?.data?.message || 'Registration failed' 
+        return {
+            success: false,
+            error: error.response?.data?.message || 'Registration failed'
         };
        }
     };
@@ -98,14 +78,10 @@ export const AuthProvider = ({ children }) => {
     const googleLogin = async (credential) => {
         try {
             const response = await api.post('/auth/google', { credential });
-            const { user, token } = response.data.data;
-
-            if (token) {
-                localStorage.setItem('token', token);
-            }
+            const { user } = response.data.data;
 
             setUser(user);
-            await initializeSocket();
+            void initializeSocket().catch((err) => console.warn('Socket background init error:', err));
 
             return { success: true };
         } catch (error) {
@@ -122,10 +98,7 @@ export const AuthProvider = ({ children }) => {
         } catch (error) {
             console.error('Logout error:', error);
         } finally {
-            localStorage.removeItem('token');
             setUser(null);
-            
-            // Disconnect Socket.io
             disconnectSocket();
         }
     };

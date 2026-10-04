@@ -13,17 +13,9 @@ export function initializeSocket() {
   const token = localStorage.getItem('token');
   const validToken = token && token !== 'null' && token !== 'undefined' ? token : null;
 
-  // If socket is connected with valid authentication or guest mode is desired
+  // If socket is already connected
   if (socketInstance?.connected) {
-    if (socketInstance.auth?.token === validToken) {
-      console.log('✅ Socket.io already connected:', socketInstance.id);
-      return Promise.resolve(socketInstance);
-    }
-    // Token updated after login: disconnect unauthenticated socket and recreate
-    console.log('🔄 Re-authenticating socket connection with new token...');
-    socketInstance.disconnect();
-    socketInstance = null;
-    connectionPromise = null;
+    return Promise.resolve(socketInstance);
   }
 
   // If connection in progress, return existing promise
@@ -114,10 +106,7 @@ export function disconnectSocket() {
  * @param {string} conversationId - Conversation ID
  */
 export function joinConversation(conversationId) {
-  const token = localStorage.getItem('token');
-  const validToken = token && token !== 'null' && token !== 'undefined' ? token : null;
-
-  if (!socketInstance || !socketInstance.connected || socketInstance.auth?.token !== validToken) {
+  if (!socketInstance || !socketInstance.connected) {
     initializeSocket().then((socket) => {
       if (socket?.connected) {
         socket.emit('conversation:join', conversationId);

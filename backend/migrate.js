@@ -10,10 +10,16 @@ const __dirname = path.dirname(__filename);
 
 dotenv.config();
 
+const needsSsl = process.env.DATABASE_URL && (
+    process.env.NODE_ENV === 'production' ||
+    process.env.DATABASE_URL.includes('sslmode=') ||
+    process.env.DATABASE_URL.includes('neon.tech')
+);
+
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl:process.env.DATABASE_URL ? {
-        rejectUnauthorized: false
+    ssl: needsSsl ? {
+        rejectUnauthorized: process.env.ALLOW_SELF_SIGNED_CERT !== 'true'
     } : false
 });
 
@@ -21,37 +27,66 @@ async function runMigration() {
     const client = await pool.connect();
 
     try {
-        console.log('Running database migration...');
+        console.log('Running database migration...\n');
 
-        // Read the schema file
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                id SERIAL PRIMARY KEY,
+                filename VARCHAR(255) NOT NULL UNIQUE,
+                applied_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            )
+        `);
+
         const schemaPath = path.join(__dirname, 'config', 'schema.sql');
-        const schemaSql = fs.readFileSync(schemaPath, 'utf8');
+        const { rows: schemaCheck } = await client.query(
+            `SELECT 1 FROM schema_migrations WHERE filename = 'schema.sql'`
+        );
 
-        // Execute schema SQL directly
-        await client.query(schemaSql);
-        console.log(`\n✅ Database migration completed!`);
-        console.log('\nTables available:');
-        console.log('  - users');
-        console.log('  - user_preferences');
-        console.log('  - pantry_items');
-        console.log('  - recipes');
-        console.log('  - recipe_ingredients');
-        console.log('  - recipe_nutrition');
-        console.log('  - meal_plans');
-        console.log('  - shopping_list_items');
-        console.log('  - posts');
-        console.log('  - comments');
-        console.log('  - likes');
-        console.log('  - notifications');
-        console.log('  - conversations');
-        console.log('  - messages');
-        console.log('  - collections');
-        console.log('  - collection_items');
-        console.log('  - challenges');
-        console.log('  - challenge_entries');
-        console.log('  - follows');
-        console.log('  - user_profiles');
+        if (schemaCheck.length === 0) {
+            const schemaSql = fs.readFileSync(schemaPath, 'utf8');
+            await client.query('BEGIN');
+            await client.query(schemaSql);
+            await client.query(
+                `INSERT INTO schema_migrations (filename) VALUES ('schema.sql')`
+            );
+            await client.query('COMMIT');
+            console.log('  ✅ schema.sql applied');
+        } else {
+            console.log('  ⏭  schema.sql already applied');
+        }
+
+        const migrationsDir = path.join(__dirname, 'config', 'migrations');
+        if (fs.existsSync(migrationsDir)) {
+            const files = fs.readdirSync(migrationsDir)
+                .filter(f => f.endsWith('.sql'))
+                .sort();
+
+            for (const file of files) {
+                const { rows } = await client.query(
+                    `SELECT 1 FROM schema_migrations WHERE filename = $1`,
+                    [file]
+                );
+
+                if (rows.length > 0) {
+                    console.log(`  ⏭  ${file} already applied`);
+                    continue;
+                }
+
+                const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf8');
+                await client.query('BEGIN');
+                await client.query(sql);
+                await client.query(
+                    `INSERT INTO schema_migrations (filename) VALUES ($1)`,
+                    [file]
+                );
+                await client.query('COMMIT');
+                console.log(`  ✅ ${file} applied`);
+            }
+        }
+
+        console.log('\n✅ Database migration completed!');
     } catch (error) {
+        await client.query('ROLLBACK').catch(() => {});
         console.error('❌ Migration failed:', error.message);
         console.error('Full error:', error);
         process.exit(1);

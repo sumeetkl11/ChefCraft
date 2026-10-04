@@ -116,8 +116,16 @@ class User{
         return { user: newUser, isNewUser: true };
     }
     
-    // find by id
     static async findById(id) {
+        const result = await pool.query(
+            `SELECT id, email, name, avatar_url, google_id, github_id, auth_provider, created_at FROM users WHERE id = $1`,
+            [id]
+        );
+        return result.rows[0];
+    }
+
+    // find by id with password
+    static async findWithPasswordById(id) {
         const result = await pool.query(
             `SELECT id, email, name, avatar_url, password, google_id, github_id, auth_provider, created_at FROM users WHERE id = $1`,
             [id]

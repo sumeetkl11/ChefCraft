@@ -1,43 +1,76 @@
 import { pool } from '../../config/db.js';
+import Purchase from '../../models/marketplace/Purchase.js';
 
 export const createPurchase = async (req, res) => {
-    try {
-        const { item_id, seller_id, quantity, price } = req.body;
-        const buyerId = req.user.id;
+    const client = await pool.connect();
 
-        const result = await pool.query(
+    try {
+        const { item_id, quantity } = req.body;
+        const buyerId = req.user.id;
+        const purchaseQty = Math.max(1, parseInt(quantity, 10) || 1);
+
+        await client.query('BEGIN');
+
+        // Lock the listing row and fetch server-side price + seller_id
+        const listingResult = await client.query(
+            `SELECT id, seller_id, price, status
+             FROM marketplace_listings
+             WHERE id = $1
+             FOR UPDATE`,
+            [item_id]
+        );
+
+        if (listingResult.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ success: false, message: 'Listing not found' });
+        }
+
+        const listing = listingResult.rows[0];
+
+        if (listing.seller_id === buyerId) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ success: false, message: 'You cannot purchase your own listing' });
+        }
+
+        if (listing.status !== 'active') {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ success: false, message: 'Listing is no longer available' });
+        }
+
+        // Use server-side price and seller_id
+        const serverPrice = listing.price;
+        const serverSellerId = listing.seller_id;
+
+        const purchaseResult = await client.query(
             `INSERT INTO purchases (buyer_id, item_id, seller_id, quantity, price, status)
              VALUES ($1, $2, $3, $4, $5, 'completed')
              RETURNING *`,
-            [buyerId, item_id, seller_id, quantity, price]
+            [buyerId, item_id, serverSellerId, purchaseQty, serverPrice]
         );
 
-        // Update listing status if bought
-        await pool.query(
+        // Mark listing as sold
+        await client.query(
             `UPDATE marketplace_listings SET status = 'sold' WHERE id = $1`,
             [item_id]
         );
 
-        res.status(201).json({ success: true, data: result.rows[0] });
+        await client.query('COMMIT');
+
+        res.status(201).json({ success: true, data: purchaseResult.rows[0] });
     } catch (error) {
+        await client.query('ROLLBACK');
         console.error('Error creating purchase:', error);
         res.status(500).json({ success: false, message: 'Server error' });
+    } finally {
+        client.release();
     }
 };
 
 export const getPurchaseHistory = async (req, res) => {
     try {
         const userId = req.user.id;
-        const result = await pool.query(
-            `SELECT p.*, m.title, m.image_url, u.name as seller_name
-             FROM purchases p
-             LEFT JOIN marketplace_listings m ON p.item_id = m.id
-             LEFT JOIN users u ON p.seller_id = u.id
-             WHERE p.buyer_id = $1
-             ORDER BY p.created_at DESC`,
-            [userId]
-        );
-        res.json({ success: true, data: result.rows });
+        const purchases = await Purchase.findByBuyerId(userId);
+        res.json({ success: true, data: purchases });
     } catch (error) {
         console.error('Error fetching purchases:', error);
         res.status(500).json({ success: false, message: 'Server error' });
@@ -47,16 +80,8 @@ export const getPurchaseHistory = async (req, res) => {
 export const getSalesHistory = async (req, res) => {
     try {
         const userId = req.user.id;
-        const result = await pool.query(
-            `SELECT p.*, m.title, m.image_url, u.name as buyer_name
-             FROM purchases p
-             LEFT JOIN marketplace_listings m ON p.item_id = m.id
-             LEFT JOIN users u ON p.buyer_id = u.id
-             WHERE p.seller_id = $1
-             ORDER BY p.created_at DESC`,
-            [userId]
-        );
-        res.json({ success: true, data: result.rows });
+        const sales = await Purchase.findBySellerId(userId);
+        res.json({ success: true, data: sales });
     } catch (error) {
         console.error('Error fetching sales:', error);
         res.status(500).json({ success: false, message: 'Server error' });

@@ -59,6 +59,10 @@ const MyRecipes = () => {
     }
   }, [recipes.length]);
 
+  useEffect(() => {
+    fetchRecipes();
+  }, [fetchRecipes]);
+
   useRevalidateOnFocus(() => fetchRecipes({ silent: true }));
 
   const handleDelete = async (id) => {
