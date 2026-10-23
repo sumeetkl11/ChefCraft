@@ -39,50 +39,131 @@ if (redisUrl) {
     console.log('✅ Redis Client Ready');
   });
 
-  redisClient.connect().catch((err) => {
+  redisClient.connect().catch(() => {
     isRedisAvailable = false;
-    console.warn('⚠️  Running without Redis caching (connection failed).');
+    console.warn('⚠️  Running without external Redis (in-memory TTL cache active).');
   });
 } else {
-  console.log('ℹ️  REDIS_URL not configured. Running with in-memory fallback (No Redis).');
+  console.log('ℹ️  REDIS_URL not configured. Running with bounded in-memory TTL cache fallback.');
 }
 
-// Safe wrapper proxy so calls to redisClient when Redis is offline do not crash or throw ECONNREFUSED
+// Bounded in-memory TTL cache fallback (max 1,000 entries) when external Redis is unavailable
+const MAX_MEMORY_ENTRIES = 1000;
+const memoryCache = new Map();
+
+function globToRegExp(pattern = '*') {
+  const escaped = String(pattern).replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.');
+  return new RegExp(`^${escaped}$`);
+}
+
+function getMemoryEntry(key) {
+  const entry = memoryCache.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    memoryCache.delete(key);
+    return null;
+  }
+  return entry.value;
+}
+
+function setMemoryEntry(key, ttlSeconds, value) {
+  if (memoryCache.size >= MAX_MEMORY_ENTRIES && !memoryCache.has(key)) {
+    const now = Date.now();
+    for (const [k, v] of memoryCache.entries()) {
+      if (now > v.expiresAt) {
+        memoryCache.delete(k);
+      }
+    }
+    if (memoryCache.size >= MAX_MEMORY_ENTRIES) {
+      const oldestKey = memoryCache.keys().next().value;
+      if (oldestKey !== undefined) {
+        memoryCache.delete(oldestKey);
+      }
+    }
+  }
+  const ttlMs = Math.max(1, Number(ttlSeconds) || 60) * 1000;
+  memoryCache.set(key, {
+    value: String(value),
+    expiresAt: Date.now() + ttlMs
+  });
+  return 'OK';
+}
+
+function matchMemoryKeys(pattern = '*') {
+  const regex = globToRegExp(pattern);
+  const now = Date.now();
+  const matched = [];
+  for (const [k, v] of memoryCache.entries()) {
+    if (now > v.expiresAt) {
+      memoryCache.delete(k);
+    } else if (regex.test(k)) {
+      matched.push(k);
+    }
+  }
+  return matched;
+}
+
 const safeRedisClient = {
   get isReady() {
-    return isRedisAvailable && redisClient?.isReady;
+    return isRedisAvailable && Boolean(redisClient?.isReady);
   },
   async get(key) {
-    if (!this.isReady) return null;
-    try {
-      return await redisClient.get(key);
-    } catch {
-      return null;
+    if (this.isReady) {
+      try {
+        return await redisClient.get(key);
+      } catch {
+        // Fall through to in-memory cache
+      }
     }
+    return getMemoryEntry(key);
   },
   async setEx(key, ttl, value) {
-    if (!this.isReady) return null;
-    try {
-      return await redisClient.setEx(key, ttl, value);
-    } catch {
-      return null;
+    if (this.isReady) {
+      try {
+        return await redisClient.setEx(key, ttl, value);
+      } catch {
+        // Fall through to in-memory cache
+      }
     }
+    return setMemoryEntry(key, ttl, value);
   },
   async del(keys) {
-    if (!this.isReady) return 0;
-    try {
-      return await redisClient.del(keys);
-    } catch {
-      return 0;
+    const keyList = Array.isArray(keys) ? keys : [keys];
+    for (const k of keyList) {
+      memoryCache.delete(k);
     }
+    if (this.isReady && keyList.length > 0) {
+      try {
+        return await redisClient.del(keyList);
+      } catch {
+        return 0;
+      }
+    }
+    return keyList.length;
   },
-  async keys(pattern) {
-    if (!this.isReady) return [];
-    try {
-      return await redisClient.keys(pattern);
-    } catch {
-      return [];
+  async keys(pattern = '*') {
+    if (this.isReady) {
+      try {
+        return await redisClient.keys(pattern);
+      } catch {
+        // Fall through to in-memory keys
+      }
     }
+    return matchMemoryKeys(pattern);
+  },
+  async scan(cursor = 0, options = {}) {
+    if (this.isReady) {
+      try {
+        return await redisClient.scan(cursor, options);
+      } catch {
+        // Fall through to in-memory scan
+      }
+    }
+    const pattern = options?.MATCH || '*';
+    return {
+      cursor: 0,
+      keys: matchMemoryKeys(pattern)
+    };
   },
   async sendCommand(args) {
     if (!this.isReady) return null;
