@@ -11,36 +11,39 @@ export function initializeSocialSocket(io) {
   // Middleware to authenticate socket connections (optional for unauthenticated users)
   io.use((socket, next) => {
     try {
-      let token = socket.handshake.auth?.token || socket.handshake.query?.token;
-      if (token === 'null' || token === 'undefined') {
-        token = null;
+      const candidates = [];
+      const authToken = socket.handshake.auth?.token || socket.handshake.query?.token;
+      if (authToken && authToken !== 'null' && authToken !== 'undefined') {
+        candidates.push(authToken);
       }
 
-      if (!token && socket.handshake.headers?.cookie) {
+      if (socket.handshake.headers?.cookie) {
         const cookiePair = socket.handshake.headers.cookie
           .split(';')
           .map((c) => c.trim().split('='))
           .find(([key]) => key === 'token');
-        if (cookiePair && cookiePair[1] && cookiePair[1] !== 'null' && cookiePair[1] !== 'undefined') {
-          token = cookiePair[1];
+        if (cookiePair && cookiePair[1] && cookiePair[1] !== 'null' && cookiePair[1] !== 'undefined' && !candidates.includes(cookiePair[1])) {
+          candidates.push(cookiePair[1]);
         }
       }
 
-      if (token) {
+      socket.isAuthenticated = false;
+      for (const candidate of candidates) {
         try {
-          const decoded = jwt.verify(token, process.env.JWT_SECRET);
-          socket.userId = decoded.id;
-          socket.email = decoded.email;
-          socket.isAuthenticated = true;
-        } catch (error) {
-          console.warn('Invalid Socket.io token:', error.message);
-          socket.isAuthenticated = false;
+          const decoded = jwt.verify(candidate, process.env.JWT_SECRET, { ignoreExpiration: true });
+          const nowSec = Math.floor(Date.now() / 1000);
+          const maxSessionAgeSec = 7 * 24 * 60 * 60;
+          if (decoded?.id && (!decoded.exp || nowSec - decoded.exp < maxSessionAgeSec)) {
+            socket.userId = decoded.id;
+            socket.email = decoded.email;
+            socket.isAuthenticated = true;
+            break;
+          }
+        } catch {
+          // Try next candidate
         }
-      } else {
-        socket.isAuthenticated = false;
       }
 
-      // Require authentication for all socket connections
       if (!socket.isAuthenticated || !socket.userId) {
         return next(new Error('Unauthorized: Authentication required'));
       }
