@@ -8,7 +8,7 @@ class ShoppingList {
         try {
             await client.query('BEGIN');
 
-            // Clear existing meal plan
+            // Clear existing meal plan items
             await client.query(
                 'DELETE FROM shopping_list_items WHERE user_id = $1 AND from_meal_plan = true',
                 [userId]);
@@ -19,38 +19,41 @@ class ShoppingList {
                  FROM meal_plans mp 
                  JOIN recipe_ingredients ri ON mp.recipe_id = ri.recipe_id 
                  WHERE mp.user_id = $1 
-                 AND mp.meal_date >= $2 
-                 AND mp.meal_date <= $3 
+                 AND mp.meal_date >= $2::date 
+                 AND mp.meal_date <= $3::date 
                  GROUP BY ri.ingredient_name, ri.unit`,
                 [userId, startDate, endDate]
             );
             const ingredients = ingredientsResult.rows;
             
-            // Get pantry items to subtract
+            // Get pantry items to subtract (normalized name matching)
             const pantryResult = await client.query(
                 `SELECT name, quantity, unit 
                  FROM pantry_items 
                  WHERE user_id = $1`,
                 [userId]
             );
-            const pantryMap = new Map();
-            pantryResult.rows.forEach(item =>{
-                const key = `${item.name.toLowerCase()}_${item.unit}`;
-                pantryMap.set(key, item.quantity);
-            });
+            const normalize = (s = '') => String(s).toLowerCase().trim().replace(/es$/, '').replace(/s$/, '');
+            const pantryItems = pantryResult.rows.map((item) => ({
+                normName: normalize(item.name),
+                quantity: parseFloat(item.quantity) || 0
+            }));
 
             // Insert shopping list items (subtract pantry quantities)
             for (const ing of ingredients) {
-                const key = `${ing.ingredient_name.toLowerCase()}_${ing.unit}`;
-                const pantryQty = pantryMap.get(key) || 0;
-                const neededQty = Math.max(0, parseFloat(ing.total_quantity) - parseFloat(pantryQty));
+                const ingNorm = normalize(ing.ingredient_name);
+                const matchedPantry = pantryItems.find(
+                    (p) => p.normName === ingNorm || p.normName.includes(ingNorm) || ingNorm.includes(p.normName)
+                );
+                const pantryQty = matchedPantry ? matchedPantry.quantity : 0;
+                const neededQty = Math.max(0, Math.round((parseFloat(ing.total_quantity) - pantryQty) * 100) / 100);
 
                 if (neededQty > 0) {
                     await client.query(
                         `INSERT INTO shopping_list_items
                         (user_id, ingredient_name, quantity, unit, from_meal_plan, category)
                          VALUES ($1, $2, $3, $4, true, $5)`,
-                        [userId, ing.ingredient_name, neededQty, ing.unit, 'Uncategorized']
+                        [userId, ing.ingredient_name, neededQty, ing.unit || 'pieces', 'Produce']
                     );
                 }
             }
@@ -203,12 +206,19 @@ class ShoppingList {
                     return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6})`;
                 }).join(', ');
 
+                const mapCategory = (cat) => {
+                    if (cat === 'Produce') return 'Vegetables';
+                    if (cat === 'Meat') return 'Proteins';
+                    if (['Vegetables', 'Fruits', 'Dairy', 'Proteins', 'Grains', 'Spices', 'Other'].includes(cat)) return cat;
+                    return 'Other';
+                };
+
                 const params = checkedItems.rows.flatMap(item => [
                     userId,
                     item.ingredient_name,
-                    parseInt(item.quantity),
-                    item.unit,
-                    item.category,
+                    Math.max(Number(item.quantity) || 1, 0.25),
+                    item.unit || 'pieces',
+                    mapCategory(item.category),
                     expiryDate
                 ]);
 
