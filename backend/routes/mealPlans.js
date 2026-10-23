@@ -9,6 +9,7 @@ router.use(authMiddleware);
 router.get('/weekly', mealPlanController.getWeeklyMealPlan);
 router.get('/upcoming', mealPlanController.getUpcomingMeals);
 router.get('/stats', mealPlanController.getMealPlanStats);
+router.post('/cook', mealPlanController.cookMeal);
 router.post('/', mealPlanController.addToMealPlan);
 router.delete('/:id', mealPlanController.deleteMealPlan);
 
