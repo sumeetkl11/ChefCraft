@@ -15,9 +15,14 @@ class MealPlan {
                 )
                 SELECT mp.id, mp.user_id, mp.recipe_id, mp.meal_date::text as meal_date, 
                        mp.meal_type, mp.created_at, mp.updated_at, 
-                       r.name as recipe_name, r.image_url, r.prep_time, r.cook_time 
+                       r.name as recipe_name, r.image_url, r.prep_time, r.cook_time,
+                       COALESCE(rn.calories, 0) as calories,
+                       COALESCE(rn.protein, 0) as protein,
+                       COALESCE(rn.carbs, 0) as carbs,
+                       COALESCE(rn.fat, 0) as fat
                 FROM new_meal mp
-                JOIN recipes r ON mp.recipe_id = r.id`,
+                JOIN recipes r ON mp.recipe_id = r.id
+                LEFT JOIN recipe_nutrition rn ON r.id = rn.recipe_id`,
                 [userId, recipeId, data, meal_type]
             );
             return result.rows[0];
@@ -26,9 +31,14 @@ class MealPlan {
                 const existing = await pool.query(
                     `SELECT mp.id, mp.user_id, mp.recipe_id, mp.meal_date::text as meal_date, 
                             mp.meal_type, mp.created_at, mp.updated_at, 
-                            r.name as recipe_name, r.image_url, r.prep_time, r.cook_time 
+                            r.name as recipe_name, r.image_url, r.prep_time, r.cook_time,
+                            COALESCE(rn.calories, 0) as calories,
+                            COALESCE(rn.protein, 0) as protein,
+                            COALESCE(rn.carbs, 0) as carbs,
+                            COALESCE(rn.fat, 0) as fat
                      FROM meal_plans mp
                      JOIN recipes r ON mp.recipe_id = r.id
+                     LEFT JOIN recipe_nutrition rn ON r.id = rn.recipe_id
                      WHERE mp.user_id = $1 AND mp.recipe_id = $2 AND mp.meal_type = $3 AND mp.meal_date = $4::date`,
                     [userId, recipeId, meal_type, data]
                 );
@@ -44,11 +54,16 @@ class MealPlan {
         const result = await pool.query(
             `SELECT mp.id, mp.user_id, mp.recipe_id, mp.meal_date::text as meal_date, 
             mp.meal_type, mp.created_at, mp.updated_at, 
-            r.name as recipe_name, r.image_url, r.prep_time, r.cook_time 
+            r.name as recipe_name, r.image_url, r.prep_time, r.cook_time,
+            COALESCE(rn.calories, 0) as calories,
+            COALESCE(rn.protein, 0) as protein,
+            COALESCE(rn.carbs, 0) as carbs,
+            COALESCE(rn.fat, 0) as fat
              FROM meal_plans mp
              JOIN recipes r ON mp.recipe_id = r.id
+             LEFT JOIN recipe_nutrition rn ON r.id = rn.recipe_id
              WHERE mp.user_id = $1 
-             AND mp.meal_date BETWEEN $2 AND $3
+             AND mp.meal_date BETWEEN $2::date AND $3::date
              ORDER BY mp.meal_date ASC,
              CASE mp.meal_type
                 WHEN 'breakfast' THEN 1
@@ -64,8 +79,9 @@ class MealPlan {
     // GET WEEKLY MEAL PLAN
     static async getWeeklyMealPlan (userId, weekStartdate) {
         try {
-            const endDate = new Date(weekStartdate);
-            endDate.setDate(endDate.getDate() + 6);
+            const endDateObj = new Date(weekStartdate);
+            endDateObj.setDate(endDateObj.getDate() + 6);
+            const endDate = endDateObj.toISOString().split('T')[0];
             
             return this.findbyDataRange(userId, weekStartdate, endDate);
         } catch (error) {
