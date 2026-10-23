@@ -6,10 +6,11 @@ import { pool } from "../config/db.js";
 import { isAdminEmail } from "../middleware/admin.js";
 import { ensureDefaultRecipesForUser } from "./recipeController.js";
 import { OAuth2Client } from "google-auth-library";
+import cacheService from "../services/cacheService.js";
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-const ACCESS_TOKEN_EXPIRY = '15m';
+const ACCESS_TOKEN_EXPIRY = '7d';
 const REFRESH_TOKEN_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000;
 
 const isProd = (req) =>
@@ -23,12 +24,16 @@ const generateRefreshToken = () => crypto.randomBytes(40).toString('hex');
 const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
 
 const storeRefreshToken = async (userId, rawToken) => {
-    const hash = hashToken(rawToken);
-    const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_MS);
-    await pool.query(
-        `INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`,
-        [userId, hash, expiresAt]
-    );
+    try {
+        const hash = hashToken(rawToken);
+        const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_MS);
+        await pool.query(
+            `INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`,
+            [userId, hash, expiresAt]
+        );
+    } catch (err) {
+        console.warn('[Auth] storeRefreshToken warning:', err.message);
+    }
 };
 
 const revokeUserRefreshTokens = async (userId) => {
@@ -44,7 +49,7 @@ const setAuthCookies = (res, req, accessToken, refreshToken) => {
         httpOnly: true,
         secure: prod,
         sameSite: prod ? 'none' : 'lax',
-        maxAge: 15 * 60 * 1000
+        maxAge: REFRESH_TOKEN_EXPIRY_MS
     });
     res.cookie('refreshToken', refreshToken, {
         httpOnly: true,
@@ -62,6 +67,8 @@ const clearAuthCookies = (res, req) => {
     res.clearCookie('refreshToken', { ...base, path: '/api/auth' });
 };
 
+import { warmUserDashboardCache } from "./userController.js";
+
 const formatUserResponse = (user) => ({
     id: user.id,
     email: user.email,
@@ -73,15 +80,29 @@ const formatUserResponse = (user) => ({
 const issueTokensAndRespond = async (res, req, user, statusCode, message) => {
     const accessToken = generateAccessToken(user);
     const refreshToken = generateRefreshToken();
-    await storeRefreshToken(user.id, refreshToken);
     setAuthCookies(res, req, accessToken, refreshToken);
+
+    const formattedUser = formatUserResponse(user);
+
+    // Non-blocking refresh token persistence & background session/dashboard cache warming
+    void storeRefreshToken(user.id, refreshToken);
+    void warmUserDashboardCache(user.id);
+    void UserPreference.findByUserId(user.id)
+        .then((preferences) =>
+            cacheService.set(
+                cacheService.CACHE_KEYS.USER_SESSION(user.id),
+                { user: formattedUser, preferences },
+                cacheService.TTL_CONFIG.SESSION
+            )
+        )
+        .catch(() => {});
 
     res.status(statusCode).json({
         success: true,
         message,
         data: {
             token: accessToken,
-            user: formatUserResponse(user)
+            user: formattedUser
         }
     });
 };
@@ -127,23 +148,31 @@ export const login = async (req, res, next) => {
 
         const user = await User.findOne({ email });
         if (!user) {
-            return res.status(401).json({ success: false, message: "Invalid credentials" });
+            return res.status(401).json({ success: false, message: "Invalid email or password" });
+        }
+
+        if (!user.password) {
+            return res.status(401).json({ success: false, message: "Account registered with Google. Please use Google Sign In." });
         }
 
         const isPasswordValid = await User.verifyPassword(password, user.password);
         if (!isPasswordValid) {
-            return res.status(401).json({ success: false, message: "Invalid credentials" });
+            return res.status(401).json({ success: false, message: "Invalid email or password" });
         }
 
         await issueTokensAndRespond(res, req, user, 200, "User logged in successfully");
     } catch (error) {
+        console.error('[Login Error]', error);
         next(error);
     }
 };
 
 export const logout = async (req, res, next) => {
     try {
-        await revokeUserRefreshTokens(req.user.id);
+        await Promise.all([
+            revokeUserRefreshTokens(req.user.id),
+            cacheService.invalidateUserSession(req.user.id)
+        ]);
         clearAuthCookies(res, req);
         res.status(200).json({ success: true, message: "Logged out successfully" });
     } catch (error) {
@@ -154,32 +183,59 @@ export const logout = async (req, res, next) => {
 export const refreshAccessToken = async (req, res, next) => {
     try {
         const rawToken = req.cookies?.refreshToken;
-        if (!rawToken) {
-            return res.status(401).json({ success: false, message: "No refresh token" });
+        let userId = null;
+        let tokenRowId = null;
+
+        if (rawToken) {
+            const hash = hashToken(rawToken);
+            const { rows } = await pool.query(
+                `SELECT * FROM refresh_tokens WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > NOW()`,
+                [hash]
+            );
+            if (rows.length > 0) {
+                userId = rows[0].user_id;
+                tokenRowId = rows[0].id;
+            }
         }
 
-        const hash = hashToken(rawToken);
-        const { rows } = await pool.query(
-            `SELECT * FROM refresh_tokens WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > NOW()`,
-            [hash]
-        );
+        // Fallback for iframe environments where third-party refreshToken cookie is blocked:
+        // verify signature of the Bearer token (allowing recent expiration up to 7 days)
+        if (!userId) {
+            const authHeader = req.header('Authorization');
+            const bearerToken = authHeader?.startsWith('Bearer ')
+                ? authHeader.replace('Bearer ', '').trim()
+                : req.cookies?.token;
 
-        if (rows.length === 0) {
+            if (bearerToken && bearerToken !== 'null' && bearerToken !== 'undefined') {
+                try {
+                    const decoded = jwt.verify(bearerToken, process.env.JWT_SECRET, { ignoreExpiration: true });
+                    const nowSec = Math.floor(Date.now() / 1000);
+                    const maxRefreshAgeSec = 7 * 24 * 60 * 60;
+                    if (decoded?.id && (!decoded.exp || nowSec - decoded.exp < maxRefreshAgeSec)) {
+                        userId = decoded.id;
+                    }
+                } catch {
+                    // Invalid signature
+                }
+            }
+        }
+
+        if (!userId) {
             return res.status(401).json({ success: false, message: "Invalid or expired refresh token" });
         }
 
-        const tokenRow = rows[0];
-        const user = await User.findById(tokenRow.user_id);
+        const user = await User.findById(userId);
         if (!user) {
             return res.status(401).json({ success: false, message: "User not found" });
         }
 
-        // Rotate: revoke old, issue new
-        await pool.query(`UPDATE refresh_tokens SET revoked_at = NOW() WHERE id = $1`, [tokenRow.id]);
+        if (tokenRowId) {
+            void pool.query(`UPDATE refresh_tokens SET revoked_at = NOW() WHERE id = $1`, [tokenRowId]).catch(() => {});
+        }
 
         const newAccessToken = generateAccessToken(user);
         const newRefreshToken = generateRefreshToken();
-        await storeRefreshToken(user.id, newRefreshToken);
+        void storeRefreshToken(user.id, newRefreshToken);
         setAuthCookies(res, req, newAccessToken, newRefreshToken);
 
         res.json({
@@ -196,20 +252,31 @@ export const refreshAccessToken = async (req, res, next) => {
 
 export const getCurrentUser = async (req, res, next) => {
     try {
-        const user = await User.findById(req.user.id);
+        const userId = req.user.id;
+        void warmUserDashboardCache(userId);
+        const sessionData = await cacheService.getOrSet(
+            cacheService.CACHE_KEYS.USER_SESSION(userId),
+            async () => {
+                const [user, preferences] = await Promise.all([
+                    User.findById(userId),
+                    UserPreference.findByUserId(userId)
+                ]);
+                if (!user) return null;
+                return {
+                    user: { ...user, isAdmin: isAdminEmail(user.email) },
+                    preferences
+                };
+            },
+            cacheService.TTL_CONFIG.SESSION
+        );
 
-        if (!user) {
+        if (!sessionData?.user) {
             return res.status(404).json({ success: false, message: "User not found" });
         }
 
-        const preferences = await UserPreference.findByUserId(req.user.id);
-
         res.json({
             success: true,
-            data: {
-                user: { ...user, isAdmin: isAdminEmail(user.email) },
-                preferences
-            }
+            data: sessionData
         });
     } catch (error) {
         next(error);
