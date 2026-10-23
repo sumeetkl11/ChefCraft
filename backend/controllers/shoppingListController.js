@@ -154,19 +154,13 @@ export const clearAll = async (req, res, next) => {
     }
 };
 
-// Add checked items to pantry
+// Add checked items to pantry (defaults to +7 days expiry when not specified for 1-click transfer)
 export const addCheckedToPantry = async (req, res, next) => {
     try {
-        const { expiry_date } = req.body;
+        const defaultExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        const expiryDate = req.body?.expiry_date || defaultExpiry;
         
-        if (!expiry_date) {
-            return res.status(400).json({
-                success: false,
-                message: "Expiry date is required"
-            });
-        }
-        
-        const items = await ShoppingList.addCheckedToPantry(req.user.id, expiry_date);
+        const items = await ShoppingList.addCheckedToPantry(req.user.id, expiryDate);
         
         res.json({
             success: true,
