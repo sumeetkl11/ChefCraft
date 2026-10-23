@@ -1,4 +1,5 @@
 import PantryItem from "../models/PantryItem.js";
+import cacheService from "../services/cacheService.js";
 
 // Get all pantry items
 export const getPantryItems = async(req, res ,next) => {
@@ -74,6 +75,7 @@ export const addPantryItem = async(req, res, next) => {
         };
 
         const item = await PantryItem.create(req.user.id, itemData);
+        await cacheService.invalidateDashboardSummary(req.user.id);
         res.status(201).json({
             success: true,
             message: 'Pantry item added successfully',
@@ -120,6 +122,7 @@ export const updatePantryItem = async(req, res, next) => {
             });
         }
         
+        await cacheService.invalidateDashboardSummary(req.user.id);
         res.json({
             success: true,
             message: 'Pantry item updated successfully',
@@ -143,6 +146,7 @@ export const deletePantryItem = async(req, res, next) => {
             });
         }
         
+        await cacheService.invalidateDashboardSummary(req.user.id);
         res.json({
             success: true,
             message: 'Pantry item deleted successfully'
