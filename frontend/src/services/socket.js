@@ -52,15 +52,15 @@ export function initializeSocket() {
   });
 
   socketInstance.on('connect_error', (error) => {
-    console.error('Socket.io connection error:', error);
+    console.warn('Socket.io connection warning:', error?.message || error);
   });
 
   socketInstance.on('error', (error) => {
-    console.error('Socket.io error:', error);
+    console.warn('Socket.io warning:', error?.message || error);
   });
 
   // Create promise that resolves when connected
-  connectionPromise = new Promise((resolve, reject) => {
+  connectionPromise = new Promise((resolve) => {
     const timeout = setTimeout(() => {
       connectionPromise = null;
       console.warn('⚠️ Socket connection timeout - continuing anyway');
@@ -76,7 +76,7 @@ export function initializeSocket() {
     socketInstance.once('connect_error', (error) => {
       clearTimeout(timeout);
       connectionPromise = null;
-      console.error('❌ Socket connection failed:', error);
+      console.warn('Socket connection retrying:', error?.message || error);
       resolve(socketInstance); // Still resolve, allow retry logic
     });
   });
