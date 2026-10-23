@@ -18,16 +18,26 @@ export const getFeedPosts = async (req, res, next) => {
     const offset = (page - 1) * limit;
     const userId = req.user?.id || null;
 
-    let posts = [];
-    let total = 0;
-
-    try {
-      posts = await Post.getFeed(userId, limit, offset);
-      const totalResult = await pool.query(`SELECT COUNT(*) as count FROM posts`);
-      total = parseInt(totalResult.rows[0]?.count || 0, 10);
-    } catch (dbError) {
-      console.warn('[Feed Posts] Direct fetch failed, returning empty set:', dbError.message);
-    }
+    const feedCacheKey = cache.CACHE_KEYS.FEED(userId || 'public', page, limit);
+    const { posts, total } = await cache.getOrSet(
+      feedCacheKey,
+      async () => {
+        try {
+          const [rows, totalResult] = await Promise.all([
+            Post.getFeed(userId, limit, offset),
+            pool.query(`SELECT COUNT(*) as count FROM posts`)
+          ]);
+          return {
+            posts: rows || [],
+            total: parseInt(totalResult.rows[0]?.count || 0, 10)
+          };
+        } catch (dbError) {
+          console.warn('[Feed Posts] Direct fetch failed, returning empty set:', dbError.message);
+          return { posts: [], total: 0 };
+        }
+      },
+      cache.TTL_CONFIG.FEED
+    );
 
     const totalPages = Math.max(1, Math.ceil(total / limit));
     res.json({
@@ -66,9 +76,12 @@ export const createPost = async (req, res, next) => {
 
     const post = await Post.findById(createdPost.id);
 
-    // Invalidate feed caches
-    await cache.invalidateFeeds();
-    await cache.invalidateUser(userId);
+    // Invalidate feed and dashboard caches
+    await Promise.all([
+      cache.invalidateFeeds(),
+      cache.invalidateUser(userId),
+      cache.invalidateDashboardSummary(userId)
+    ]);
 
     req.io?.emit('feed:post_created', post);
 
