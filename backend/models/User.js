@@ -166,7 +166,12 @@ class User{
     // verify user password
 
     static async verifyPassword(plainPassword, hashedPassword){
-        return await bcrypt.compare(plainPassword, hashedPassword);
+        if (!plainPassword || !hashedPassword) return false;
+        try {
+            return await bcrypt.compare(plainPassword, hashedPassword);
+        } catch {
+            return false;
+        }
     }
 }
 
