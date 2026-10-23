@@ -2,39 +2,49 @@ import jwt from "jsonwebtoken";
 
 const authMiddleware = async (req, res, next) => {
     try {
-        let token = null;
-        
-        // 1. Prioritize Authorization header (most reliable for cross-origin SPA requests)
+        const candidates = [];
+
+        // 1. Check Authorization header
         const authHeader = req.header("Authorization");
         if (authHeader?.startsWith("Bearer ")) {
             const bearerToken = authHeader.replace("Bearer ", "").trim();
             if (bearerToken && bearerToken !== 'null' && bearerToken !== 'undefined') {
-                token = bearerToken;
+                candidates.push(bearerToken);
             }
         }
 
-        // 2. Fall back to cookie if no valid Bearer header
-        if (!token && req.cookies?.token) {
+        // 2. Check cookie token
+        if (req.cookies?.token) {
             const cookieToken = req.cookies.token;
-            if (cookieToken && cookieToken !== 'null' && cookieToken !== 'undefined') {
-                token = cookieToken;
+            if (cookieToken && cookieToken !== 'null' && cookieToken !== 'undefined' && !candidates.includes(cookieToken)) {
+                candidates.push(cookieToken);
             }
         }
 
-        if (!token) {
+        if (candidates.length === 0) {
             return res.status(401).json({
                 success: false,
                 message: "No authentication token, access denied"
             });
         }
 
-        // verify token
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        let decoded = null;
+        for (const candidate of candidates) {
+            try {
+                const payload = jwt.verify(candidate, process.env.JWT_SECRET);
+                if (payload?.id) {
+                    decoded = payload;
+                    break;
+                }
+            } catch {
+                // Try next token candidate
+            }
+        }
 
-        if (!decoded.id) {
+        if (!decoded?.id) {
             return res.status(401).json({
                 success: false,
-                message: "Invalid token payload, please log in again."
+                message: "Invalid or expired token"
             });
         }
 
@@ -44,9 +54,7 @@ const authMiddleware = async (req, res, next) => {
         };
 
         next();
-    }
-    catch (error) {
-        console.error("Auth middleware error:", error);
+    } catch {
         return res.status(401).json({
             success: false,
             message: "Invalid or expired token"
