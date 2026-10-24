@@ -17,6 +17,9 @@ build/
 *.tgz
 *.tar.gz
 
+# IDE & AI Studio Artifacts
+.aistudio/
+
 # Runtime data
 pids
 *.pid
