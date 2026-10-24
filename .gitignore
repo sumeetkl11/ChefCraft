@@ -67,3 +67,5 @@ temp/
 stitch_dashboard.html
 stitch_pantry.html
 stitch_recipe_generator.html
+.vercel
+.env*
