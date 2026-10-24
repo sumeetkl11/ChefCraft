@@ -1,10 +1,27 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { Clock, Users, ArrowLeft, Trash2, Sparkles } from 'lucide-react';
+import { Clock, Users, ArrowLeft, Trash2, Sparkles, ChefHat, Play, Pause, RotateCcw } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import toast from 'react-hot-toast';
 import api from '../services/api'
 import useRevalidateOnFocus from '../hooks/useRevalidateOnFocus';
+
+function extractStepDurationSeconds(text = '') {
+    const match = String(text).match(/(\d+)(?:\s*-\s*(\d+))?\s*(hours?|hrs?|hr|minutes?|mins?|min|seconds?|secs?|sec)\b/i);
+    if (!match) return null;
+    const val = parseInt(match[2] || match[1], 10);
+    if (!val || val <= 0) return null;
+    const unit = match[3].toLowerCase();
+    if (unit.startsWith('h')) return val * 3600;
+    if (unit.startsWith('s')) return val;
+    return val * 60;
+}
+
+function formatTimer(sec) {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
 
 const RecipeDetail = () => {
     const { id } = useParams();
@@ -15,6 +32,53 @@ const RecipeDetail = () => {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [deleting, setDeleting] = useState(false);
+    const [cooking, setCooking] = useState(false);
+    const [stepTimers, setStepTimers] = useState({});
+
+    useEffect(() => {
+        const hasRunning = Object.values(stepTimers).some((t) => t.running && t.remaining > 0);
+        if (!hasRunning) return undefined;
+
+        const interval = setInterval(() => {
+            setStepTimers((prev) => {
+                const next = { ...prev };
+                let changed = false;
+                for (const [idx, timer] of Object.entries(next)) {
+                    if (timer.running && timer.remaining > 0) {
+                        changed = true;
+                        const nextRem = timer.remaining - 1;
+                        if (nextRem <= 0) {
+                            next[idx] = { ...timer, remaining: 0, running: false };
+                            toast.success(`⏰ Step ${Number(idx) + 1} timer finished!`);
+                        } else {
+                            next[idx] = { ...timer, remaining: nextRem };
+                        }
+                    }
+                }
+                return changed ? next : prev;
+            });
+        }, 1000);
+
+        return () => clearInterval(interval);
+    }, [stepTimers]);
+
+    const toggleStepTimer = (index, defaultSeconds) => {
+        setStepTimers((prev) => {
+            const current = prev[index] || { remaining: defaultSeconds, total: defaultSeconds, running: false };
+            const remaining = current.remaining <= 0 ? defaultSeconds : current.remaining;
+            return {
+                ...prev,
+                [index]: { ...current, remaining, running: !current.running }
+            };
+        });
+    };
+
+    const resetStepTimer = (index, defaultSeconds) => {
+        setStepTimers((prev) => ({
+            ...prev,
+            [index]: { remaining: defaultSeconds, total: defaultSeconds, running: false }
+        }));
+    };
 
     const fetchRecipe = useCallback(async (options = {}) => {
         const silent = options.silent && Boolean(recipe);
@@ -39,6 +103,33 @@ const RecipeDetail = () => {
     }, [id, navigate, recipe]);
 
     useRevalidateOnFocus(() => fetchRecipe({ silent: true }), { intervalMs: 60000 });
+
+    const handleCookRecipe = async () => {
+        if (cooking || !recipe?.id) return;
+        try {
+            setCooking(true);
+            const originalServings = recipe.servings || 4;
+            const multiplier = servings / originalServings;
+            const res = await api.post('/meal-plans/cook', {
+                recipeId: recipe.id,
+                servingsMultiplier: multiplier
+            });
+            api.clearCache('pantry');
+            api.clearCache('user/dashboard-summary');
+            const info = res.data?.data;
+            const count = info?.totalMatched || 0;
+            const streakDays = info?.streak?.current_streak;
+            toast.success(
+                count > 0
+                    ? `Cooked! Auto-deducted ${count} pantry item(s)${streakDays ? ` • 🔥 ${streakDays}d streak` : ''}`
+                    : `Marked "${recipe.name}" as cooked!${streakDays ? ` • 🔥 ${streakDays}d streak` : ''}`
+            );
+        } catch (error) {
+            toast.error(error.response?.data?.message || 'Failed to deduct pantry ingredients');
+        } finally {
+            setCooking(false);
+        }
+    };
 
     const handleDelete = async () => {
         if (deleting) return;
@@ -144,22 +235,33 @@ const RecipeDetail = () => {
                             Refreshing recipe
                         </div>
                     )}
-                    <div className="flex items-start justify-between mb-6">
+                    <div className="flex items-start justify-between mb-6 gap-4 flex-wrap">
                         <div className="flex-1">
                             <h1 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4 leading-tight">{recipe.name}</h1>
                             {recipe.description && (
                                 <p className="text-gray-700 text-xl leading-relaxed max-w-3xl">{recipe.description}</p>
                             )}
                         </div>
-                        <button
-                            onClick={handleDelete}
-                            type="button"
-                            disabled={deleting}
-                            className="relative z-10 inline-flex items-center gap-2 rounded-2xl border border-rose-400/20 bg-rose-500/8 px-4 py-3 text-gray-400 hover:text-red-600 transition-colors disabled:cursor-not-allowed disabled:opacity-70 cursor-pointer"
-                        >
-                            <Trash2 className="w-5 h-5" />
-                            <span className="text-sm font-medium">{deleting ? 'Deleting...' : 'Delete'}</span>
-                        </button>
+                        <div className="flex items-center gap-3 relative z-10">
+                            <button
+                                onClick={handleCookRecipe}
+                                type="button"
+                                disabled={cooking}
+                                className="inline-flex items-center gap-2 rounded-2xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-emerald-700 hover:bg-emerald-500 hover:text-white transition-colors disabled:cursor-not-allowed disabled:opacity-70 cursor-pointer"
+                            >
+                                <ChefHat className="w-5 h-5" />
+                                <span className="text-sm font-medium">{cooking ? 'Cooking...' : 'Mark as Cooked'}</span>
+                            </button>
+                            <button
+                                onClick={handleDelete}
+                                type="button"
+                                disabled={deleting}
+                                className="inline-flex items-center gap-2 rounded-2xl border border-rose-400/20 bg-rose-500/8 px-4 py-3 text-gray-400 hover:text-red-600 transition-colors disabled:cursor-not-allowed disabled:opacity-70 cursor-pointer"
+                            >
+                                <Trash2 className="w-5 h-5" />
+                                <span className="text-sm font-medium">{deleting ? 'Deleting...' : 'Delete'}</span>
+                            </button>
+                        </div>
                     </div>
 
                     {/* Tags */}
@@ -303,17 +405,53 @@ const RecipeDetail = () => {
                                     <span className="text-2xl">📝</span>
                                     Step-by-Step Instructions
                                 </h2>
-                                <p className="text-gray-600 text-sm">Follow these simple steps to create your dish</p>
+                                <p className="text-gray-600 text-sm">Follow these simple steps to create your dish • Click any detected timer to start a countdown</p>
                             </div>
                             <ol className="space-y-5">
-                                {recipe.instructions && recipe.instructions.map((step, index) => (
-                                    <li key={index} className="flex gap-4 p-5 rounded-2xl border-2 border-white/60 bg-white/50 backdrop-blur-md shadow-md hover:shadow-lg transition-shadow">
-                                        <span className="shrink-0 w-10 h-10 bg-gradient-to-br from-amber-500 to-orange-600 shadow-lg shadow-orange-500/30 text-white rounded-full flex items-center justify-center text-base font-bold">
-                                            {index + 1}
-                                        </span>
-                                        <p className="text-gray-800 text-base leading-relaxed pt-1.5 flex-1">{step}</p>
-                                    </li>
-                                ))}
+                                {recipe.instructions && recipe.instructions.map((step, index) => {
+                                    const detectedSec = extractStepDurationSeconds(step);
+                                    const timer = stepTimers[index];
+                                    const remaining = timer ? timer.remaining : detectedSec;
+                                    const isRunning = Boolean(timer?.running);
+
+                                    return (
+                                        <li key={index} className="flex flex-col gap-3 p-5 rounded-2xl border-2 border-white/60 bg-white/50 backdrop-blur-md shadow-md hover:shadow-lg transition-shadow">
+                                            <div className="flex gap-4">
+                                                <span className="shrink-0 w-10 h-10 bg-gradient-to-br from-amber-500 to-orange-600 shadow-lg shadow-orange-500/30 text-white rounded-full flex items-center justify-center text-base font-bold">
+                                                    {index + 1}
+                                                </span>
+                                                <p className="text-gray-800 text-base leading-relaxed pt-1.5 flex-1">{step}</p>
+                                            </div>
+                                            {detectedSec && (
+                                                <div className="pl-14 flex items-center gap-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => toggleStepTimer(index, detectedSec)}
+                                                        className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all shadow-sm ${
+                                                            isRunning
+                                                                ? 'bg-amber-500 text-white animate-pulse'
+                                                                : 'bg-amber-100/90 text-amber-900 hover:bg-amber-200'
+                                                        }`}
+                                                    >
+                                                        {isRunning ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+                                                        <span>{isRunning ? `Running: ${formatTimer(remaining)}` : `⏱ Timer: ${formatTimer(remaining)}`}</span>
+                                                    </button>
+                                                    {timer && timer.remaining !== detectedSec && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => resetStepTimer(index, detectedSec)}
+                                                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs font-medium bg-white/70 text-slate-600 hover:bg-white border border-slate-200"
+                                                            title="Reset Timer"
+                                                        >
+                                                            <RotateCcw className="w-3 h-3" />
+                                                            Reset
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </li>
+                                    );
+                                })}
                             </ol>
                         </div>
 
