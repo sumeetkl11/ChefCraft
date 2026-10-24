@@ -2,7 +2,6 @@ import dotenv from 'dotenv';
 import path from 'path';
 dotenv.config({ path: path.resolve(import.meta.dirname, '.env'), override: true });
 dotenv.config({ path: path.resolve(import.meta.dirname, '../.env'), override: true });
-process.env.PORT = '3000';
 
 import express from 'express';
 import compression from 'compression';
@@ -142,6 +141,11 @@ if (fs.existsSync(frontendDistPath)) {
     }
   }));
 }
+
+// Health check endpoint for Render/uptime monitors
+app.get(['/', '/health'], (req, res) => {
+  res.status(200).json({ status: 'ok', service: 'chefcraft-backend', timestamp: new Date().toISOString() });
+});
 
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 
