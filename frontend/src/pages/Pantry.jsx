@@ -58,7 +58,17 @@ const Pantry = () => {
       );
     }
 
-    if (selectedCategory !== 'All') {
+    if (selectedCategory === 'Expiring Soon') {
+      const now = new Date();
+      now.setHours(0, 0, 0, 0);
+      result = result.filter(item => {
+        if (!item.expiry_date) return false;
+        const exp = new Date(item.expiry_date);
+        exp.setHours(0, 0, 0, 0);
+        const days = Math.round((exp - now) / (1000 * 60 * 60 * 24));
+        return days >= 0 && days <= 7;
+      });
+    } else if (selectedCategory !== 'All') {
       result = result.filter(item => item.category === selectedCategory);
     }
 
@@ -94,13 +104,14 @@ const Pantry = () => {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  const expiringCount = items.filter(item => {
+  const expiringItemsList = items.filter(item => {
     if (!item.expiry_date) return false;
     const expiryDate = new Date(item.expiry_date);
     expiryDate.setHours(0, 0, 0, 0);
     const days = Math.round((expiryDate - today) / (1000 * 60 * 60 * 24));
     return days >= 0 && days <= 7;
-  }).length;
+  });
+  const expiringCount = expiringItemsList.length;
 
   const expiredCount = items.filter(item => {
     if (!item.expiry_date) return false;
@@ -153,6 +164,14 @@ const Pantry = () => {
               >
                 All
               </button>
+              {expiringCount > 0 && (
+                <button 
+                  onClick={() => setSelectedCategory('Expiring Soon')}
+                  className={`px-5 py-2 rounded-full font-label-md whitespace-nowrap transition-all border border-amber-400/50 ${selectedCategory === 'Expiring Soon' ? 'bg-amber-500 text-white shadow-md' : 'bg-amber-50/70 text-amber-800 hover:bg-amber-100'}`}
+                >
+                  ⏳ Expiring Soon ({expiringCount})
+                </button>
+              )}
               {CATEGORIES.map(cat => (
                 <button 
                   key={cat}
@@ -212,7 +231,10 @@ const Pantry = () => {
               </div>
 
               {/* Expiring Soon Stat */}
-              <div className="flex items-center gap-4 p-4 rounded-2xl bg-white/40 border border-white/60">
+              <div 
+                onClick={() => expiringCount > 0 && setSelectedCategory(selectedCategory === 'Expiring Soon' ? 'All' : 'Expiring Soon')}
+                className={`flex items-center gap-4 p-4 rounded-2xl bg-white/40 border border-white/60 ${expiringCount > 0 ? 'cursor-pointer hover:bg-amber-50/50 transition-colors' : ''}`}
+              >
                 <div className="w-12 h-12 rounded-xl bg-amber-100 flex items-center justify-center text-amber-600">
                   <span className="material-symbols-outlined">running_with_errors</span>
                 </div>
@@ -237,6 +259,19 @@ const Pantry = () => {
 
               {/* CTA Buttons */}
               <div className="space-y-3 mt-4">
+                {expiringCount > 0 && (
+                  <button 
+                    onClick={() => {
+                      const names = expiringItemsList.map(i => i.name).join(', ');
+                      toast.success(`Prioritizing expiring items: ${names}`);
+                      navigate('/generate', { state: { usePantry: true, expiringIngredients: expiringItemsList.map(i => i.name) } });
+                    }}
+                    className="w-full py-3.5 rounded-2xl bg-amber-500 text-white font-bold hover:bg-amber-600 transition-all flex items-center justify-center gap-2 shadow-md"
+                  >
+                    <span className="material-symbols-outlined">schedule</span>
+                    Cook With Expiring ({expiringCount})
+                  </button>
+                )}
                 <button 
                   onClick={() => navigate('/generate', { state: { usePantry: true } })}
                   className="w-full py-3.5 rounded-2xl border-2 border-primary/20 text-primary font-bold hover:bg-primary/5 transition-colors flex items-center justify-center gap-2"
