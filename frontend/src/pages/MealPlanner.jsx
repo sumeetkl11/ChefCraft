@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Calendar as CalendarIcon, Plus, X, ChefHat } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Calendar as CalendarIcon, Plus, X, ChefHat, Check, ShoppingCart, Flame } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import toast from 'react-hot-toast';
 import api from '../services/api';
@@ -13,26 +14,32 @@ const formatDate = (d, fmt) => {
     const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
     const monthsShort = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-    return fmt
-        .replace('MMMM', months[d.getMonth()])
-        .replace('MMM', monthsShort[d.getMonth()])
-        .replace('MM', pad(d.getMonth() + 1))
-        .replace('EEEE', days[d.getDay()])
-        .replace('yyyy', d.getFullYear())
-        .replace('dd', pad(d.getDate()))
-        .replace('d', d.getDate());
+    const tokens = {
+        MMMM: months[d.getMonth()],
+        MMM: monthsShort[d.getMonth()],
+        MM: pad(d.getMonth() + 1),
+        EEEE: days[d.getDay()],
+        yyyy: String(d.getFullYear()),
+        dd: pad(d.getDate()),
+        d: String(d.getDate())
+    };
+    return fmt.replace(/MMMM|MMM|MM|EEEE|yyyy|dd|d/g, (match) => tokens[match]);
 };
 
 const MEAL_TYPES = ['breakfast', 'lunch', 'dinner'];
 const DAYS_OF_WEEK = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 const MealPlanner = () => {
+    const navigate = useNavigate();
     const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
     const [mealPlan, setMealPlan] = useState({});
     const [recipes, setRecipes] = useState([]);
     const [showAddModal, setShowAddModal] = useState(false);
     const [selectedSlot, setSelectedSlot] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [cookedMealIds, setCookedMealIds] = useState(new Set());
+    const [cookingMealId, setCookingMealId] = useState(null);
+    const [syncingList, setSyncingList] = useState(false);
 
     useEffect(() => {
         fetchMealPlan();
@@ -65,7 +72,6 @@ const MealPlanner = () => {
         const setupSocket = (sock) => {
             if (!sock || cleanedUp) return;
             sock.on('mealplan:update', handleMealPlanUpdate);
-            sock.on('connect', fetchMealPlan);
         };
 
         if (activeSocket) {
@@ -81,7 +87,6 @@ const MealPlanner = () => {
             cleanedUp = true;
             if (activeSocket) {
                 activeSocket.off('mealplan:update', handleMealPlanUpdate);
-                activeSocket.off('connect', fetchMealPlan);
             }
         };
     }, [weekStart]);
@@ -90,17 +95,19 @@ const MealPlanner = () => {
         try {
             const startDate = formatDate(weekStart, 'yyyy-MM-dd');
             const response = await api.get('/meal-plans/weekly', { params: { start_date: startDate } });
-            const meals = response.data.data.mealPlans;
+            const rawMeals = response.data?.data?.mealPlans ?? response.data?.data;
+            const meals = Array.isArray(rawMeals) ? rawMeals : [];
 
             // organize meals by date and meal type
             const organized = {};
             meals.forEach(meal => {
-                const dateKey = meal.meal_date;
+                const dateKey = String(meal.meal_date || '').slice(0, 10);
+                if (!dateKey) return;
                 if (!organized[dateKey]) {
                     organized[dateKey] = {};
                 }
                 organized[dateKey][meal.meal_type] = meal;
-            })
+            });
 
             setMealPlan(organized);
         } catch (error) {
@@ -113,15 +120,61 @@ const MealPlanner = () => {
     const fetchRecipes = async () => {
         try {
             const response = await api.get('/recipes');
-            setRecipes(response.data.data.recipes);
+            const rawRecipes = response.data?.data?.recipes ?? response.data?.data;
+            setRecipes(Array.isArray(rawRecipes) ? rawRecipes : []);
         } catch (error) {
             console.error('Error fetching recipes:', error);
+            setRecipes([]);
         }
     };
 
     const handleAddMeal = (date, mealType) => {
         setSelectedSlot({ date, mealType });
         setShowAddModal(true);
+    };
+
+    const handleSyncShoppingList = async () => {
+        if (syncingList) return;
+        try {
+            setSyncingList(true);
+            const startDate = formatDate(weekStart, 'yyyy-MM-dd');
+            const endDate = formatDate(addDays(weekStart, 6), 'yyyy-MM-dd');
+            const res = await api.post('/shopping-list/generate', { startDate, endDate });
+            api.clearCache('shopping-list');
+            const items = res.data?.data?.items || [];
+            toast.success(`Synced ${items.length} missing ingredient(s) to Shopping List!`);
+            navigate('/shopping-list');
+        } catch (error) {
+            toast.error(error.response?.data?.message || 'Failed to sync shopping list');
+        } finally {
+            setSyncingList(false);
+        }
+    };
+
+    const handleCookMeal = async (meal) => {
+        if (!meal?.recipe_id || cookingMealId === meal.id) return;
+        try {
+            setCookingMealId(meal.id);
+            const res = await api.post('/meal-plans/cook', {
+                recipeId: meal.recipe_id,
+                mealPlanId: meal.id
+            });
+            api.clearCache('pantry');
+            api.clearCache('user/dashboard-summary');
+            const info = res.data?.data;
+            const count = info?.totalMatched || 0;
+            const streakDays = info?.streak?.current_streak;
+            setCookedMealIds((prev) => new Set(prev).add(meal.id));
+            toast.success(
+                count > 0
+                    ? `Cooked! Auto-deducted ${count} pantry item(s)${streakDays ? ` • 🔥 ${streakDays}d streak` : ''}`
+                    : `Marked "${meal.recipe_name}" as cooked!${streakDays ? ` • 🔥 ${streakDays}d streak` : ''}`
+            );
+        } catch (error) {
+            toast.error(error.response?.data?.message || 'Failed to mark meal as cooked');
+        } finally {
+            setCookingMealId(null);
+        }
     };
 
     const handleRemoveMeal = async (mealId) => {
@@ -156,6 +209,32 @@ const MealPlanner = () => {
         return mealPlan[date] || {};
     };
 
+    const getDayNutrition = (dayIndex) => {
+        const dayMealsObj = getDayMeals(dayIndex);
+        return Object.values(dayMealsObj).reduce(
+            (acc, meal) => ({
+                calories: acc.calories + (Number(meal.calories) || 0),
+                protein: acc.protein + (Number(meal.protein) || 0),
+                carbs: acc.carbs + (Number(meal.carbs) || 0),
+                fat: acc.fat + (Number(meal.fat) || 0)
+            }),
+            { calories: 0, protein: 0, carbs: 0, fat: 0 }
+        );
+    };
+
+    const weeklyNutrition = DAYS_OF_WEEK.reduce(
+        (acc, _, idx) => {
+            const d = getDayNutrition(idx);
+            return {
+                calories: acc.calories + d.calories,
+                protein: acc.protein + d.protein,
+                carbs: acc.carbs + d.carbs,
+                fat: acc.fat + d.fat
+            };
+        },
+        { calories: 0, protein: 0, carbs: 0, fat: 0 }
+    );
+
     return (
         <div className="page-bg min-h-screen">
             <Navbar />
@@ -178,8 +257,16 @@ const MealPlanner = () => {
                             <h1 className="font-display text-4xl text-slate-900">Meal Planner</h1>
                         </div>
 
-                        {/* Week Navigation */}
-                        <div className="flex items-center gap-3">
+                        {/* Week Navigation & Shopping Sync */}
+                        <div className="flex flex-wrap items-center gap-3">
+                            <button
+                                onClick={handleSyncShoppingList}
+                                disabled={syncingList}
+                                className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-full font-medium shadow-md shadow-emerald-600/20 transition-all disabled:opacity-50"
+                            >
+                                <ShoppingCart className="w-4 h-4" />
+                                {syncingList ? 'Syncing...' : 'Sync to Shopping List'}
+                            </button>
                             <button
                                 onClick={() => setWeekStart(addDays(weekStart, -7))}
                                 className="px-4 py-2.5 bg-white/40 border border-white/60 text-slate-700 rounded-full hover:bg-white/60 font-medium transition-all backdrop-blur-sm"
@@ -217,14 +304,23 @@ const MealPlanner = () => {
                         <div className="p-4 font-semibold text-slate-700 border-r border-white/40 flex items-center justify-center">
                             Meal
                         </div>
-                        {DAYS_OF_WEEK.map((day, index) => (
-                            <div key={day} className="p-4 text-center border-r border-white/40 last:border-r-0">
-                                <div className="font-semibold text-slate-900">{day.substring(0,3)}</div>
-                                <div className="text-sm text-slate-500 font-medium">
-                                    {formatDate(addDays(weekStart, index), 'MMM d')}
+                        {DAYS_OF_WEEK.map((day, index) => {
+                            const dayNutr = getDayNutrition(index);
+                            return (
+                                <div key={day} className="p-4 text-center border-r border-white/40 last:border-r-0">
+                                    <div className="font-semibold text-slate-900">{day.substring(0,3)}</div>
+                                    <div className="text-sm text-slate-500 font-medium">
+                                        {formatDate(addDays(weekStart, index), 'MMM d')}
+                                    </div>
+                                    {dayNutr.calories > 0 && (
+                                        <div className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-800 text-[11px] font-semibold">
+                                            <Flame className="w-3 h-3 text-amber-600" />
+                                            {dayNutr.calories} kcal
+                                        </div>
+                                    )}
                                 </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
 
                     {/* Meal Rows */}
@@ -245,12 +341,33 @@ const MealPlanner = () => {
                                     >
                                         {meal ? (
                                             <div className="relative group h-full">
-                                                <div className="bg-gradient-to-br from-amber-300/40 to-orange-400/20 border border-amber-300/30 rounded-xl p-3 h-full flex items-center justify-center shadow-sm backdrop-blur-md">
+                                                <div className={`border rounded-xl p-3 h-full flex flex-col items-center justify-center shadow-sm backdrop-blur-md transition-colors ${cookedMealIds.has(meal.id) ? 'bg-emerald-400/25 border-emerald-400/40' : 'bg-gradient-to-br from-amber-300/40 to-orange-400/20 border-amber-300/30'}`}>
                                                     <p className="text-sm font-semibold text-amber-950 text-center line-clamp-3">
                                                         {meal.recipe_name}
                                                     </p>
+                                                    {Number(meal.calories) > 0 && (
+                                                        <span className="mt-1 text-[11px] font-medium text-amber-900/75">
+                                                            {meal.calories} kcal • {meal.protein || 0}g P
+                                                        </span>
+                                                    )}
+                                                    {cookedMealIds.has(meal.id) && (
+                                                        <span className="mt-1 text-[10px] font-bold uppercase tracking-wider text-emerald-800">
+                                                            Cooked ✓
+                                                        </span>
+                                                    )}
                                                     <button
+                                                        type="button"
+                                                        onClick={() => handleCookMeal(meal)}
+                                                        disabled={cookingMealId === meal.id}
+                                                        title="Mark as Cooked & Auto-Deduct Pantry Ingredients"
+                                                        className="absolute -top-2 -left-2 p-1.5 bg-emerald-500 rounded-full hover:bg-emerald-600 text-white opacity-0 group-hover:opacity-100 transition-all shadow-md scale-75 group-hover:scale-100 disabled:opacity-50"
+                                                    >
+                                                        <Check className="w-3 h-3" />
+                                                    </button>
+                                                    <button
+                                                        type="button"
                                                         onClick={() => handleRemoveMeal(meal.id)}
+                                                        title="Remove from Meal Plan"
                                                         className="absolute -top-2 -right-2 p-1.5 bg-rose-500 rounded-full hover:bg-rose-600 text-white opacity-0 group-hover:opacity-100 transition-all shadow-md scale-75 group-hover:scale-100"
                                                     >
                                                         <X className="w-3 h-3" />
@@ -273,8 +390,8 @@ const MealPlanner = () => {
                     ))}
                 </div>
 
-                {/* Stats */}
-                <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* Stats & Weekly Nutrition Summary */}
+                <div className="mt-8 grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div className="glass-card bg-white/40 border border-white/60 p-5 backdrop-blur-md">
                         <p className="text-sm font-semibold uppercase tracking-wider text-slate-500">Meals Planned</p>
                         <p className="text-3xl font-display text-slate-900 mt-1">
@@ -286,10 +403,23 @@ const MealPlanner = () => {
                         <p className="text-3xl font-display text-slate-900 mt-1">{recipes.length}</p>
                     </div>
                     <div className="glass-card bg-white/40 border border-white/60 p-5 backdrop-blur-md">
-                        <p className="text-sm font-semibold uppercase tracking-wider text-slate-500">This Week</p>
-                        <p className="text-xl font-display text-slate-900 mt-2">
-                            {formatDate(weekStart, 'MMM d')} - {formatDate(addDays(weekStart, 6), 'MMM d')}
+                        <p className="text-sm font-semibold uppercase tracking-wider text-amber-700 flex items-center gap-1.5">
+                            <Flame className="w-4 h-4 text-amber-600" />
+                            Weekly Calories
                         </p>
+                        <p className="text-3xl font-display text-slate-900 mt-1">
+                            {weeklyNutrition.calories.toLocaleString()} <span className="text-base font-normal text-slate-500">kcal</span>
+                        </p>
+                    </div>
+                    <div className="glass-card bg-white/40 border border-white/60 p-5 backdrop-blur-md">
+                        <p className="text-sm font-semibold uppercase tracking-wider text-emerald-700">Weekly Macros</p>
+                        <div className="flex items-center justify-between mt-2 text-sm font-semibold text-slate-800">
+                            <span>{weeklyNutrition.protein}g Protein</span>
+                            <span>•</span>
+                            <span>{weeklyNutrition.carbs}g Carbs</span>
+                            <span>•</span>
+                            <span>{weeklyNutrition.fat}g Fat</span>
+                        </div>
                     </div>
                 </div>
             </div>
