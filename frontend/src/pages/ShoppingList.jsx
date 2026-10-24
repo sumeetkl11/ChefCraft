@@ -101,6 +101,26 @@ const ShoppingList = () => {
         }
     };
 
+    const handleQuickMoveToPantry = async () => {
+        const checkedCount = items.filter(item => item && item.is_checked).length;
+        if (checkedCount === 0) {
+            toast.error('No items checked');
+            return;
+        }
+        try {
+            const defaultExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+            await api.post('/shopping-list/add-to-pantry', { expiry_date: defaultExpiry });
+            api.clearCache('pantry');
+            api.clearCache('user/dashboard-summary');
+            const updatedItems = items.filter(item => item && !item.is_checked);
+            setItems(updatedItems);
+            organizeByCategory(updatedItems);
+            toast.success(`Moved ${checkedCount} bought item(s) straight to your Pantry!`);
+        } catch (error) {
+            toast.error('Failed to move items to pantry');
+        }
+    };
+
     const handleAddToPantry = async () => {
         const checkedCount = items.filter(item => item && item.is_checked).length;
         if (checkedCount === 0) {
@@ -120,6 +140,8 @@ const ShoppingList = () => {
 
         try {
             await api.post('/shopping-list/add-to-pantry', { expiry_date: expiryDate });
+            api.clearCache('pantry');
+            api.clearCache('user/dashboard-summary');
             const updatedItems = items.filter(item => item && !item.is_checked);
             setItems(updatedItems);
             organizeByCategory(updatedItems);
@@ -185,11 +207,18 @@ const ShoppingList = () => {
                         {checkedCount > 0 && (
                             <>
                                 <button
+                                    onClick={handleQuickMoveToPantry}
+                                    className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-3 rounded-full font-semibold transition-all shadow-md shadow-emerald-600/20"
+                                >
+                                    <Check className="w-5 h-5" />
+                                    1-Click Move to Pantry ({checkedCount})
+                                </button>
+                                <button
                                     onClick={handleAddToPantry}
                                     className="flex items-center gap-2 bg-white/40 border border-white/60 backdrop-blur-md text-amber-700 hover:bg-white/60 px-5 py-3 rounded-full font-semibold transition-all shadow-sm"
                                 >
                                     <ShoppingCart className="w-5 h-5" />
-                                    Add to Pantry ({checkedCount})
+                                    Set Custom Expiry
                                 </button>
                                 <button
                                     onClick={handleClearChecked}
