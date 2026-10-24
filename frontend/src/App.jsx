@@ -10,18 +10,20 @@ import RouteSceneAnimator from './components/RouteSceneAnimator';
 import { useAuth } from './context/AuthContext';
 import './App.css';
 
-// Route-based code splitting
-const Login = lazy(() => import('./pages/Login'));
-const SignUp = lazy(() => import('./pages/SignUp'));
-const Dashboard = lazy(() => import('./pages/Dashboard'));
-const Pantry = lazy(() => import('./pages/Pantry'));
+// Core primary routes imported eagerly for 0ms route transition (no Suspense waterfall)
+import Login from './pages/Login';
+import SignUp from './pages/SignUp';
+import Dashboard from './pages/Dashboard';
+import Pantry from './pages/Pantry';
+import MyRecipes from './pages/MyRecipes';
+import ShoppingList from './pages/ShoppingList';
+import Settings from './pages/Settings';
+import MealPlanner from './pages/MealPlanner';
+import SocialPage from './pages/SocialPage';
+
+// Secondary & protected sandbox routes lazy-loaded
 const RecipeGenerator = lazy(() => import('./pages/RecipeGenerator'));
-const MyRecipes = lazy(() => import('./pages/MyRecipes'));
 const RecipeDetail = lazy(() => import('./pages/RecipeDetail'));
-const ShoppingList = lazy(() => import('./pages/ShoppingList'));
-const Settings = lazy(() => import('./pages/Settings'));
-const MealPlanner = lazy(() => import('./pages/MealPlanner'));
-const SocialPage = lazy(() => import('./pages/SocialPage'));
 const ChallengesPage = lazy(() => import('./pages/ChallengesPage'));
 const CollectionsPage = lazy(() => import('./pages/CollectionsPage'));
 const CollectionDetailPage = lazy(() => import('./pages/CollectionDetailPage'));
