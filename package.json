@@ -1,0 +1,17 @@
+{
+  "name": "kitchen-canvas",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "build:frontend": "npm run build --workspace=frontend",
+    "build": "npm run build --workspace=frontend",
+    "dev": "npm run build --workspace=frontend && PORT=3000 node backend/server.js",
+    "start": "PORT=3000 node backend/server.js",
+    "lint": "npm run lint --workspace=frontend"
+  }
+}
