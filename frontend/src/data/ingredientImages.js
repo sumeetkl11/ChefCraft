@@ -1,12 +1,12 @@
 // Ingredient Image Mapping for Pantry Items
-// Dynamically imports local images from src/assets/images/pantry-images
+// Dynamically imports local WebP images from src/assets/images/pantry-images
 
-const localImages = import.meta.glob('../assets/images/pantry-images/*.jpg', { eager: true, import: 'default' });
+const localImages = import.meta.glob('../assets/images/pantry-images/*.webp', { eager: true, import: 'default' });
 
 export const INGREDIENT_IMAGES = {};
 
 Object.entries(localImages).forEach(([filePath, url]) => {
-  const fileName = filePath.split('/').pop().replace(/\.jpg$/i, '');
+  const fileName = filePath.split('/').pop().replace(/\.(webp|jpg|jpeg|png)$/i, '');
   const key = fileName.replace(/_/g, ' ').toLowerCase().trim();
   INGREDIENT_IMAGES[key] = url;
 
