@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { Search, Clock, ChefHat, Trash2, ArrowRight, Sparkles } from 'lucide-react';
 import Navbar from '../components/Navbar';
@@ -18,8 +18,10 @@ const MyRecipes = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  const hasRecipesRef = useRef(false);
 
   useEffect(() => {
+    hasRecipesRef.current = recipes.length > 0;
     let filtered = recipes;
 
     if (searchQuery) {
@@ -41,7 +43,7 @@ const MyRecipes = () => {
   }, [recipes, searchQuery, selectedCuisine, selectedDifficulty]);
 
   const fetchRecipes = useCallback(async (options = {}) => {
-    const silent = options.silent && recipes.length > 0;
+    const silent = options.silent && hasRecipesRef.current;
     try {
       if (silent) {
         setRefreshing(true);
@@ -49,7 +51,8 @@ const MyRecipes = () => {
         setLoading(true);
       }
       const response = await api.get('/recipes');
-      setRecipes(response.data.data.recipes || []);
+      const rawRecipes = response.data?.data?.recipes ?? response.data?.data;
+      setRecipes(Array.isArray(rawRecipes) ? rawRecipes : []);
     } catch (error) {
       console.error('Error fetching recipes:', error);
       toast.error('Failed to load recipes');
@@ -57,7 +60,7 @@ const MyRecipes = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [recipes.length]);
+  }, []);
 
   useEffect(() => {
     fetchRecipes();
