@@ -25,6 +25,32 @@ const Dashboard = () => {
         setLoading(true);
       }
 
+      try {
+        const summaryRes = await api.get('/user/dashboard-summary', { ttl: 60000 });
+        const summaryData = summaryRes.data?.data;
+        if (summaryData) {
+          if (summaryData.stats) {
+            setStats((prev) => ({
+              totalRecipes: summaryData.stats.totalRecipes ?? prev.totalRecipes,
+              pantryItems: summaryData.stats.pantryItems ?? prev.pantryItems,
+              mealsThisWeek: summaryData.stats.mealsThisWeek ?? prev.mealsThisWeek
+            }));
+          }
+          if (Array.isArray(summaryData.recentRecipes)) {
+            setRecentRecipes(summaryData.recentRecipes);
+          }
+          if (Array.isArray(summaryData.upcomingMeals)) {
+            setUpcomingMeals(summaryData.upcomingMeals);
+          }
+          if (Array.isArray(summaryData.popularPosts)) {
+            setPopularPosts(summaryData.popularPosts);
+          }
+          return;
+        }
+      } catch (summaryErr) {
+        console.warn('Unified dashboard summary unavailable, falling back to individual endpoints:', summaryErr);
+      }
+
       const results = await Promise.allSettled([
         api.get('/pantry/stats'),
         api.get('/meal-plans/stats'),
