@@ -1,4 +1,4 @@
-import { startTransition, useCallback, useDeferredValue, useEffect, useState } from 'react';
+import { startTransition, useCallback, useDeferredValue, useEffect, useRef, useState } from 'react';
 import { RefreshCcw, Sparkles } from 'lucide-react';
 import api, { buildApiUrl } from '../services/api';
 import { getSocket } from '../services/socket';
@@ -22,14 +22,19 @@ export default function SocialFeed() {
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const hasPostsRef = useRef(posts.length > 0);
   const deferredPosts = useDeferredValue(posts);
   const visiblePosts = deferredPosts;
+
+  useEffect(() => {
+    hasPostsRef.current = posts.length > 0;
+  }, [posts.length]);
 
   const fetchFeed = useCallback(async (targetPage = 1, replace = false) => {
     try {
       if (targetPage === 1 && replace) {
         setRefreshing(true);
-      } else if (targetPage === 1 && posts.length > 0) {
+      } else if (targetPage === 1 && hasPostsRef.current) {
         setRefreshing(true);
       } else {
         setLoading(true);
@@ -65,7 +70,7 @@ export default function SocialFeed() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [posts.length]);
+  }, []);
 
   useEffect(() => {
     if (posts.length > 0) {
